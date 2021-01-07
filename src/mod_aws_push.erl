@@ -1,7 +1,11 @@
 %%%-------------------------------------------------------------------
 %%% @author Peter Leung
-%%% @copyright (C) 2020, <COMPANY>
+%%% @copyright (C) 2020, Peter Leung
 %%% @doc
+%%%
+%%%
+%%%
+%%%
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_aws_push).
@@ -9,14 +13,23 @@
 -author('Peter Leung').
 
 -behaviour(gen_mod).
+-behaviour(gen_server).
 
 -export([start/2, stop/1]).
 -export([mod_doc/0, mod_options/1, depends/2, reload/3, mod_opt_type/1]).
--export([process_iq/1, offline_message/1]).
+-export([process_iq/1, offline_message/1, process_offline_message/1]).
+
+-export([start_link/2]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
+	code_change/3]).
+
+-define(SERVER, ?MODULE).
 
 -include_lib("xmpp/include/xmpp.hrl").
 -include("logger.hrl").
 -include("translate.hrl").
+
+-record(mod_aws_push_state, {host}).
 
 -record(aws_push_jid_type_token, {jid_type_token, arn}).
 -record(aws_push_jid_seq, {jid_seq, token, type}).
@@ -26,32 +39,10 @@
 %%% Spawning and gen_mod implementation
 %%%===================================================================
 start(Host, Opts) ->
-	ejabberd_mnesia:create(?MODULE, aws_push_jid_type_token,
-		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid_type_token)}]),
-
-	ejabberd_mnesia:create(?MODULE, aws_push_jid_seq,
-		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid_seq)}]),
-
-	ejabberd_mnesia:create(?MODULE, aws_push_jid,
-		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid)}]),
-
-	gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0, ?MODULE, process_iq),
-	ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, offline_message, 70),
-
-	application:set_env(erlcloud, aws_access_key_id, mod_aws_push_opt:aws_access_key_id(Opts)),
-	application:set_env(erlcloud, aws_secret_access_key, mod_aws_push_opt:aws_secret_access_key(Opts)),
-	application:set_env(erlcloud, aws_region, mod_aws_push_opt:aws_region(Opts)),
-	application:set_env(erlcloud, fcm, mod_aws_push_opt:fcm_platform_endpoint(Opts)),
-	application:set_env(erlcloud, apn, mod_aws_push_opt:apn_platform_endpoint(Opts)),
-
-	{ok,_} = application:ensure_all_started(erlcloud),
-	?INFO_MSG("~p start started.~n",[?MODULE]),
-	ok.
+	gen_mod:start_child(?MODULE, Host, Opts).
 
 stop(Host) ->
-	gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0),
-	ejabberd_hooks:delete(offline_message_hook, Host, ?MODULE, offline_message, 70),
-	application:stop(erlcloud).
+	gen_mod:stop_child(?MODULE, Host).
 
 reload(_Host, _NewOpts, _OldOpts) ->
 	ok.
@@ -82,11 +73,66 @@ depends(_Host, _Opts) ->
 	[].
 
 %%%===================================================================
+%%% Spawning and gen_server implementation
+%%%===================================================================
+
+start_link(Host, Opts) ->
+	Proc = gen_mod:get_module_proc(Host, ?MODULE),
+	gen_server:start_link({local, Proc}, ?MODULE, [Host, Opts], []).
+
+
+init([Host, Opts]) ->
+	?INFO_MSG("start ~p~n",[?MODULE]),
+
+	ejabberd_mnesia:create(?MODULE, aws_push_jid_type_token,
+		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid_type_token)}]),
+	ejabberd_mnesia:create(?MODULE, aws_push_jid_seq,
+		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid_seq)}]),
+	ejabberd_mnesia:create(?MODULE, aws_push_jid,
+		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid)}]),
+
+	application:set_env(erlcloud, aws_access_key_id, mod_aws_push_opt:aws_access_key_id(Opts)),
+	application:set_env(erlcloud, aws_secret_access_key, mod_aws_push_opt:aws_secret_access_key(Opts)),
+	application:set_env(erlcloud, aws_region, mod_aws_push_opt:aws_region(Opts)),
+	application:set_env(erlcloud, fcm, mod_aws_push_opt:fcm_platform_endpoint(Opts)),
+	application:set_env(erlcloud, apn, mod_aws_push_opt:apn_platform_endpoint(Opts)),
+	{ok,_} = application:ensure_all_started(erlcloud),
+
+	gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0, ?MODULE, process_iq),
+	ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, offline_message, 70),
+
+	{ok, #mod_aws_push_state{host=Host}}.
+
+handle_call(_Request, _From, State = #mod_aws_push_state{}) ->
+	{reply, ok, State}.
+
+handle_cast({offline_message_received,To, Packet}, State = #mod_aws_push_state{}) ->
+	process_offline_message({To, Packet}),
+	{noreply, State}.
+
+handle_info(_Info, State = #mod_aws_push_state{}) ->
+	{noreply, State}.
+
+terminate(_Reason, _State = #mod_aws_push_state{host = Host}) ->
+	application:stop(erlcloud),
+	gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0),
+	ejabberd_hooks:delete(offline_message_hook, Host, ?MODULE, offline_message, 70).
+
+code_change(_OldVsn, State = #mod_aws_push_state{}, _Extra) ->
+	{ok, State}.
+
+%%%===================================================================
 %%% Internal functions
 %%%===================================================================
 -spec offline_message({any(), message()}) -> {any(), message()}.
-offline_message({_Action, #message{to = To} = _Packet} = _Acc) ->
+offline_message({_Action, #message{to = To} = Packet} = _Acc) ->
 	?INFO_MSG("User has received an offline message. Jid:~p~n",[To]),
+	Proc = gen_mod:get_module_proc(To#jid.lserver, ?MODULE),
+	gen_server:cast(Proc, {offline_message_received,To, Packet}),
+	ok.
+
+process_offline_message({To, _Packet}) ->
+	?INFO_MSG("start to process offline message to ~p~n",[To]),
 	case mnesia:dirty_read(aws_push_jid, To) of
 		[Item] when is_record(Item, aws_push_jid) ->
 			#aws_push_jid{status = Status, arn=Arn} = Item,
@@ -96,7 +142,7 @@ offline_message({_Action, #message{to = To} = _Packet} = _Acc) ->
 					Subject = "Subject",
 					case publish(Arn, Message, Subject) of
 						{ok, _} ->
-							?INFO_MSG("Notification sent.~n", []),
+							?INFO_MSG("Notification sent.Jid:~p~n", [To]),
 							ok;
 						{error, Reason} ->
 							?ERROR_MSG(
@@ -105,25 +151,19 @@ offline_message({_Action, #message{to = To} = _Packet} = _Acc) ->
 							ok
 					end;
 				_ ->
-					?INFO_MSG("Use has disabled notification.~n", []),
+					?INFO_MSG("Use has disabled notification.Jid:~p~n", [To]),
 					ok
 			end;
 		_ ->
-			?INFO_MSG("Use has not registered notification.~n", []),
+			?INFO_MSG("Use has not registered notification.Jid:~p~n", [To]),
 			ok
 	end.
 
-process_iq(#iq{from = _From,
-	to = _To,
-	lang = Lang,
-	sub_els = [#push_enable{
-		jid = PushJID,
-		node = _Node,
+process_iq(#iq{lang = Lang, sub_els = [#push_enable{jid = PushJID,
 		xdata = #xdata{fields = [
 			#xdata_field{var = <<"type">>, values = [Type]},
 			#xdata_field{var = <<"token">>, values = [Token]}
 		]}}]} = IQ) ->
-
 	?INFO_MSG("User is registering its device.Jid:~p,Type:~p,Token:~p~n",[PushJID,Type,Token]),
 
 	% Get Platform Arn
@@ -177,25 +217,33 @@ process_iq(#iq{from = _From,
 					xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
 			end
 	end;
-process_iq(#iq{from = _From,
-	to = _To,
-	lang = _Lang,
-	sub_els = [#push_disable{jid = PushJID,
-		node = _Node}]} = IQ) ->
+process_iq(#iq{lang = _Lang, sub_els = [#push_enable{jid = PushJID}]} = IQ) ->
+	?INFO_MSG("User has enabled its notification.Jid:~p~n",[PushJID]),
+	F = fun () ->
+			case mnesia:wread({aws_push_jid, PushJID}) of
+				[Item] when is_record(Item, aws_push_jid) ->
+					mnesia:write(Item#aws_push_jid{
+						status = true
+					});
+				_ ->
+					ok
+			end
+	    end,
+	transaction(IQ, F);
+process_iq(#iq{sub_els = [#push_disable{jid = PushJID}]} = IQ) ->
 	?INFO_MSG("User has disabled its notification.Jid:~p~n",[PushJID]),
 	F = fun () ->
-		case mnesia:wread({aws_push_jid, PushJID}) of
-			[Item] when is_record(Item, aws_push_jid) ->
-				mnesia:write(Item#aws_push_jid{
-					status = false
-				});
-			_ ->
-				ok
-		end
-	end,
+			case mnesia:wread({aws_push_jid, PushJID}) of
+				[Item] when is_record(Item, aws_push_jid) ->
+					mnesia:write(Item#aws_push_jid{
+						status = false
+					});
+				_ ->
+					ok
+			end
+	    end,
 	transaction(IQ, F);
-process_iq(#iq{lang = _Lang} = IQ) ->
-	?INFO_MSG("~p process_iq started.~n",[?MODULE]),
+process_iq(#iq{} = IQ) ->
 	xmpp:make_error(IQ, xmpp:err_not_allowed()).
 
 get_platform_endpoint_arn(PlatformAppArn,Token) ->
