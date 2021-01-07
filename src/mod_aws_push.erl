@@ -18,14 +18,22 @@
 -include("logger.hrl").
 -include("translate.hrl").
 
--record(aws_notification, {jid, arn, arn_status, token, status, type}).
+-record(aws_push_jid_type_token, {jid_type_token, arn}).
+-record(aws_push_jid_seq, {jid_seq, token, type}).
+-record(aws_push_jid, {jid, seq, token, type, status, arn}).
 
 %%%===================================================================
 %%% Spawning and gen_mod implementation
 %%%===================================================================
 start(Host, Opts) ->
-	ejabberd_mnesia:create(?MODULE, aws_notification,
-		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_notification)}]),
+	ejabberd_mnesia:create(?MODULE, aws_push_jid_type_token,
+		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid_type_token)}]),
+
+	ejabberd_mnesia:create(?MODULE, aws_push_jid_seq,
+		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid_seq)}]),
+
+	ejabberd_mnesia:create(?MODULE, aws_push_jid,
+		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid)}]),
 
 	gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0, ?MODULE, process_iq),
 	ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, offline_message, 70),
@@ -78,24 +86,22 @@ depends(_Host, _Opts) ->
 %%%===================================================================
 -spec offline_message({any(), message()}) -> {any(), message()}.
 offline_message({_Action, #message{to = To} = _Packet} = _Acc) ->
-	?INFO_MSG("~p offline_message started.~n",[?MODULE]),
-	case mnesia:dirty_read({aws_notification, To}) of
-		[Item] when is_record(Item, aws_notification) ->
-			#aws_notification{arn = Arn, status = Status} = Item,
+	?INFO_MSG("User has received an offline message. Jid:~p~n",[To]),
+	case mnesia:dirty_read(aws_push_jid, To) of
+		[Item] when is_record(Item, aws_push_jid) ->
+			#aws_push_jid{status = Status, arn=Arn} = Item,
 			case Status of
 				true ->
-					case erlcloud_sns:get_endpoint_attributes(Arn) of
-						[_, {attributes,[{enabled,"true"},_]}] ->
-							?INFO_MSG("publish message to aws.~n", []),
-							erlcloud_sns:publish(
-								target,
-								Arn,
-								"You have received a message.",
-								"Subject",
-								erlcloud_aws:default_config()
-							);
-						_ ->
-							?INFO_MSG("end point is disabled.~n", []),
+					Message = <<"Test Message">>,
+					Subject = "Subject",
+					case publish(Arn, Message, Subject) of
+						{ok, _} ->
+							?INFO_MSG("Notification sent.~n", []),
+							ok;
+						{error, Reason} ->
+							?ERROR_MSG(
+								"Error occurs when sending message to arn. Reason:~p,Arn:~p~n",
+								[Reason, Arn]),
 							ok
 					end;
 				_ ->
@@ -103,24 +109,22 @@ offline_message({_Action, #message{to = To} = _Packet} = _Acc) ->
 					ok
 			end;
 		_ ->
+			?INFO_MSG("Use has not registered notification.~n", []),
 			ok
 	end.
 
 process_iq(#iq{from = _From,
 	to = _To,
-	lang = _Lang,
+	lang = Lang,
 	sub_els = [#push_enable{
 		jid = PushJID,
 		node = _Node,
-		xdata = XData}]} = IQ) ->
+		xdata = #xdata{fields = [
+			#xdata_field{var = <<"type">>, values = [Type]},
+			#xdata_field{var = <<"token">>, values = [Token]}
+		]}}]} = IQ) ->
 
-
-	?INFO_MSG("~p process_iq started.IQ:~n",[?MODULE]),
-
-	#xdata{fields = [
-		#xdata_field{var = <<"type">>, values = [Type]},
-		#xdata_field{var = <<"token">>, values = [Token]}
-	]} = XData,
+	?INFO_MSG("User is registering its device.Jid:~p,Type:~p,Token:~p~n",[PushJID,Type,Token]),
 
 	% Get Platform Arn
 	PlatformAppArn =
@@ -135,66 +139,62 @@ process_iq(#iq{from = _From,
 				xmpp:make_error(IQ, xmpp:err_not_allowed())
 		end,
 
-	case get_platform_endpoint_arn(PlatformAppArn,Token) of
-		{ok, PlatformEndPointArn} ->
-			F = fun () ->
-					case mnesia:wread({aws_notification, PushJID}) of
-						[] ->
-							mnesia:write(#aws_notification{
-								jid = PushJID,
-								arn = PlatformEndPointArn,
-								token = Token,
-								status = true,
-								type = Type
-							});
-						[Item] when is_record(Item, aws_notification) ->
-							mnesia:write(Item#aws_notification{
-								arn = PlatformEndPointArn,
-								token = Token,
-								status = true,
-								type = Type
-							});
+	case mnesia:dirty_read({aws_push_jid_type_token, {PushJID, Type, Token}}) of
+		[Item] when is_record(Item, aws_push_jid_type_token) ->
+			#aws_push_jid_type_token{arn = Arn} = Item,
+			case mnesia:dirty_read({aws_push_jid, PushJID}) of
+				[Item2] when is_record(Item2, aws_push_jid) ->
+					#aws_push_jid{type = Type2, token = Token2} = Item2,
+					case {Type2, Token2} of
+						{Type, Token} ->
+							% when user use the same device.
+							xmpp:make_iq_result(IQ);
 						_ ->
-							false
-					end
-			    end,
-			case mnesia:transaction(F) of
-				{atomic, _Res} ->
-					?INFO_MSG("write table aws_notification success!~n",[]),
-					xmpp:make_iq_result(IQ);
-				{aborted, Reason} ->
-					?ERROR_MSG("timeout check error: ~p~n", [Reason]),
-					xmpp:make_error(IQ, xmpp:err_not_allowed())
+							% this will happen when user switch device
+							% insert aws_push_jid_seq table and update aws_push_jid.
+							F = fun() -> insert_part_tables(PushJID, Token, Type, Arn) end,
+							transaction(IQ, F)
+					end;
+				_ ->
+					% if the transaction works well, this is the case it should never happens.
+					?ERROR_MSG(
+						"The record has integrity issue. JId:~p, Type:~p, Token:~p~n",
+						[PushJID, Type, Token]),
+					Txt = ?T("System error occurs."),
+					xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
 			end;
 		_ ->
-			xmpp:make_error(IQ, xmpp:err_not_allowed())
+			case get_platform_endpoint_arn(PlatformAppArn,Token) of
+				{ok, Arn} ->
+					% insert aws_push_jid, aws_push_jid_seq and aws_push_jid_type_token.
+					F = fun() -> insert_all_tables(PushJID, Token, Type, Arn) end,
+					transaction(IQ, F);
+				{error, Reason} ->
+					?ERROR_MSG(
+						"Can't create a new platform endpoint arn. Reason:~p, JId:~p, Type:~p, Token:~p~n",
+						[Reason, PushJID, Type, Token]),
+					Txt = ?T(Reason),
+					xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
+			end
 	end;
 process_iq(#iq{from = _From,
 	to = _To,
 	lang = _Lang,
 	sub_els = [#push_disable{jid = PushJID,
 		node = _Node}]} = IQ) ->
-	?INFO_MSG("~p process_iq started.IQ=~p~n",[?MODULE, IQ]),
-
+	?INFO_MSG("User has disabled its notification.Jid:~p~n",[PushJID]),
 	F = fun () ->
-			case mnesia:wread({aws_notification, PushJID}) of
-				[Item] when is_record(Item, aws_notification) ->
-					mnesia:write(Item#aws_notification{
-						status = false
-					});
-				_ ->
-					ok
-			end
-		end,
-	case mnesia:transaction(F) of
-		{atomic, _Res} ->
-			?INFO_MSG("Update status = false in table aws_notification success!~n",[]),
-			xmpp:make_iq_result(IQ);
-		{aborted, Reason} ->
-			?ERROR_MSG("timeout check error: ~p~n", [Reason]),
-			xmpp:make_error(IQ, xmpp:err_not_allowed())
-	end;
-process_iq(IQ) ->
+		case mnesia:wread({aws_push_jid, PushJID}) of
+			[Item] when is_record(Item, aws_push_jid) ->
+				mnesia:write(Item#aws_push_jid{
+					status = false
+				});
+			_ ->
+				ok
+		end
+	end,
+	transaction(IQ, F);
+process_iq(#iq{lang = _Lang} = IQ) ->
 	?INFO_MSG("~p process_iq started.~n",[?MODULE]),
 	xmpp:make_error(IQ, xmpp:err_not_allowed()).
 
@@ -204,3 +204,60 @@ get_platform_endpoint_arn(PlatformAppArn,Token) ->
 	catch
 	    _:Reason -> {error, Reason}
 	end.
+
+publish(Arn, Message, Subject) ->
+	try erlcloud_sns:publish(target,Arn,Message, Subject,erlcloud_aws:default_config()) of
+		Result -> {ok, Result}
+	catch
+		_:Reason -> {error, Reason}
+	end.
+
+transaction(#iq{lang = Lang} = IQ, F) ->
+	case mnesia:transaction(F) of
+		{atomic, _Res} ->
+			xmpp:make_iq_result(IQ);
+		{aborted, Reason} ->
+			?ERROR_MSG("Database failure. Reason:~p~n", [Reason]),
+			Txt = ?T("Database failure."),
+			xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
+	end.
+
+insert_part_tables(PushJID, Token, Type, Arn) ->
+
+	Seq = {erlang:timestamp(), node()},
+	case mnesia:wread({aws_push_jid, PushJID}) of
+		[Item] when is_record(Item, aws_push_jid) ->
+			mnesia:write(Item#aws_push_jid{
+				seq = Seq,
+				type = Type,
+				token = Token,
+				arn = Arn
+			});
+		_ ->
+			ok
+	end,
+	mnesia:write(#aws_push_jid_seq{
+		jid_seq = {PushJID, Seq},
+		token = Token,
+		type = Type
+	}).
+
+insert_all_tables(PushJID, Token, Type, Arn) ->
+	Seq = {erlang:timestamp(), node()},
+	mnesia:write(#aws_push_jid{
+		jid = PushJID,
+		seq = Seq,
+		status = true,
+		token = Token,
+		type = Type,
+		arn = Arn
+	}),
+	mnesia:write(#aws_push_jid_seq{
+		jid_seq = {PushJID, Seq},
+		token = Token,
+		type = Type
+	}),
+	mnesia:write(#aws_push_jid_type_token{
+		jid_type_token = {PushJID, Type, Token},
+		arn = Arn
+	}).
