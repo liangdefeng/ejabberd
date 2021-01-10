@@ -21,6 +21,9 @@
 
 -export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
+	publish/2,
+	make_message/2,
+	get_attributes/0,
 	code_change/3]).
 
 -define(SERVER, ?MODULE).
@@ -31,9 +34,8 @@
 
 -record(mod_aws_push_state, {host}).
 
--record(aws_push_jid_type_token, {jid_type_token, arn}).
--record(aws_push_jid_seq, {jid_seq, token, type}).
--record(aws_push_jid, {jid, seq, token, type, status, arn}).
+-record(aws_push_type_token, {type_token, arn}).
+-record(aws_push_jid, {jid, token, type, status, arn}).
 
 %%%===================================================================
 %%% Spawning and gen_mod implementation
@@ -56,14 +58,26 @@ mod_opt_type(aws_region) ->
 mod_opt_type(fcm_platform_endpoint) ->
 	econf:string();
 mod_opt_type(apn_platform_endpoint) ->
+	econf:string();
+mod_opt_type(apn_topic) ->
+	econf:string();
+mod_opt_type(apn_ttl) ->
+	econf:int();
+mod_opt_type(apn_sandbox) ->
+	econf:bool();
+mod_opt_type(apn_push_type) ->
 	econf:string().
 
 mod_options(_Host) ->
 	[{aws_access_key_id,""},
 		{aws_secret_access_key, ""},
-		{aws_region, ""},
+		{aws_region, "us-west-1"},
 		{fcm_platform_endpoint, ""},
-		{apn_platform_endpoint, ""}
+		{apn_platform_endpoint, ""},
+		{apn_topic, ""},
+		{apn_ttl, 5},
+		{apn_sandbox, true},
+		{apn_push_type, "alert"}
 	].
 
 mod_doc() ->
@@ -80,14 +94,11 @@ start_link(Host, Opts) ->
 	Proc = gen_mod:get_module_proc(Host, ?MODULE),
 	gen_server:start_link({local, Proc}, ?MODULE, [Host, Opts], []).
 
-
 init([Host, Opts]) ->
 	?INFO_MSG("start ~p~n",[?MODULE]),
 
-	ejabberd_mnesia:create(?MODULE, aws_push_jid_type_token,
-		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid_type_token)}]),
-	ejabberd_mnesia:create(?MODULE, aws_push_jid_seq,
-		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid_seq)}]),
+	ejabberd_mnesia:create(?MODULE, aws_push_type_token,
+		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_type_token)}]),
 	ejabberd_mnesia:create(?MODULE, aws_push_jid,
 		[{disc_copies, [node()]}, {attributes, record_info(fields, aws_push_jid)}]),
 
@@ -96,6 +107,11 @@ init([Host, Opts]) ->
 	application:set_env(erlcloud, aws_region, mod_aws_push_opt:aws_region(Opts)),
 	application:set_env(erlcloud, fcm, mod_aws_push_opt:fcm_platform_endpoint(Opts)),
 	application:set_env(erlcloud, apn, mod_aws_push_opt:apn_platform_endpoint(Opts)),
+	application:set_env(erlcloud, apn_topic, mod_aws_push_opt:apn_topic(Opts)),
+	application:set_env(erlcloud, apn_ttl, mod_aws_push_opt:apn_ttl(Opts)),
+	application:set_env(erlcloud, apn_push_type, mod_aws_push_opt:apn_push_type(Opts)),
+	application:set_env(erlcloud, apn_sandbox, mod_aws_push_opt:apn_sandbox(Opts)),
+
 	{ok,_} = application:ensure_all_started(erlcloud),
 
 	gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0, ?MODULE, process_iq),
@@ -131,16 +147,15 @@ offline_message({_Action, #message{to = To} = Packet} = _Acc) ->
 	gen_server:cast(Proc, {offline_message_received,To, Packet}),
 	ok.
 
-process_offline_message({To, _Packet}) ->
+process_offline_message({To, #message{body = [#text{data = Data}] = _Body} = _Packet}) ->
 	?INFO_MSG("start to process offline message to ~p~n",[To]),
 	case mnesia:dirty_read(aws_push_jid, To) of
 		[Item] when is_record(Item, aws_push_jid) ->
-			#aws_push_jid{status = Status, arn=Arn} = Item,
+			#aws_push_jid{type = Type, status = Status, arn=Arn} = Item,
 			case Status of
 				true ->
-					Message = <<"Test Message">>,
-					Subject = "Subject",
-					case publish(Arn, Message, Subject) of
+					Message = make_message(Type, Data),
+					case publish(Arn, Message) of
 						{ok, _} ->
 							?INFO_MSG("Notification sent.Jid:~p~n", [To]),
 							ok;
@@ -157,7 +172,10 @@ process_offline_message({To, _Packet}) ->
 		_ ->
 			?INFO_MSG("Use has not registered notification.Jid:~p~n", [To]),
 			ok
-	end.
+	end;
+process_offline_message({_To, _Packet}) ->
+	?INFO_MSG("Do nothing!", []),
+	ok.
 
 process_iq(#iq{lang = Lang, sub_els = [#push_enable{jid = PushJID,
 		xdata = #xdata{fields = [
@@ -179,9 +197,9 @@ process_iq(#iq{lang = Lang, sub_els = [#push_enable{jid = PushJID,
 				xmpp:make_error(IQ, xmpp:err_not_allowed())
 		end,
 
-	case mnesia:dirty_read({aws_push_jid_type_token, {PushJID, Type, Token}}) of
-		[Item] when is_record(Item, aws_push_jid_type_token) ->
-			#aws_push_jid_type_token{arn = Arn} = Item,
+	case mnesia:dirty_read({aws_push_type_token, {Type, Token}}) of
+		[Item] when is_record(Item, aws_push_type_token) ->
+			#aws_push_type_token{arn = Arn} = Item,
 			case mnesia:dirty_read({aws_push_jid, PushJID}) of
 				[Item2] when is_record(Item2, aws_push_jid) ->
 					#aws_push_jid{type = Type2, token = Token2} = Item2,
@@ -192,21 +210,26 @@ process_iq(#iq{lang = Lang, sub_els = [#push_enable{jid = PushJID,
 						_ ->
 							% this will happen when user switch device
 							% insert aws_push_jid_seq table and update aws_push_jid.
-							F = fun() -> insert_part_tables(PushJID, Token, Type, Arn) end,
+							% Associate the PushJid with the exiting token, type and arn.
+							F = fun() -> update_push_jid(PushJID, Token, Type, Arn) end,
 							transaction(IQ, F)
 					end;
 				_ ->
-					% if the transaction works well, this is the case it should never happens.
-					?ERROR_MSG(
-						"The record has integrity issue. JId:~p, Type:~p, Token:~p~n",
-						[PushJID, Type, Token]),
-					Txt = ?T("System error occurs."),
-					xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
+					F = fun () ->
+						mnesia:write(Item#aws_push_jid{
+							jid = PushJID,
+							type = Type,
+							status = true,
+							token = Token,
+							arn = Arn
+						})
+					    end,
+					transaction(IQ, F)
 			end;
 		_ ->
-			case get_platform_endpoint_arn(PlatformAppArn,Token) of
+			case create_platform_endpoint(PlatformAppArn,Token) of
 				{ok, Arn} ->
-					% insert aws_push_jid, aws_push_jid_seq and aws_push_jid_type_token.
+					% insert aws_push_jid and aws_push_type_token.
 					F = fun() -> insert_all_tables(PushJID, Token, Type, Arn) end,
 					transaction(IQ, F);
 				{error, Reason} ->
@@ -246,15 +269,15 @@ process_iq(#iq{sub_els = [#push_disable{jid = PushJID}]} = IQ) ->
 process_iq(#iq{} = IQ) ->
 	xmpp:make_error(IQ, xmpp:err_not_allowed()).
 
-get_platform_endpoint_arn(PlatformAppArn,Token) ->
+create_platform_endpoint(PlatformAppArn,Token) ->
 	try erlcloud_sns:create_platform_endpoint(PlatformAppArn,Token) of
 		Result -> {ok, Result}
 	catch
 	    _:Reason -> {error, Reason}
 	end.
 
-publish(Arn, Message, Subject) ->
-	try erlcloud_sns:publish(target,Arn,Message, Subject,erlcloud_aws:default_config()) of
+publish(Arn, Message) ->
+	try erlcloud_sns:publish(target, Arn, Message, undefined, get_attributes(), erlcloud_aws:default_config()) of
 		Result -> {ok, Result}
 	catch
 		_:Reason -> {error, Reason}
@@ -270,42 +293,57 @@ transaction(#iq{lang = Lang} = IQ, F) ->
 			xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
 	end.
 
-insert_part_tables(PushJID, Token, Type, Arn) ->
+update_push_jid(PushJID, Token, Type, Arn) ->
 
-	Seq = {erlang:timestamp(), node()},
 	case mnesia:wread({aws_push_jid, PushJID}) of
 		[Item] when is_record(Item, aws_push_jid) ->
 			mnesia:write(Item#aws_push_jid{
-				seq = Seq,
 				type = Type,
 				token = Token,
 				arn = Arn
 			});
 		_ ->
 			ok
-	end,
-	mnesia:write(#aws_push_jid_seq{
-		jid_seq = {PushJID, Seq},
-		token = Token,
-		type = Type
-	}).
+	end.
 
 insert_all_tables(PushJID, Token, Type, Arn) ->
-	Seq = {erlang:timestamp(), node()},
 	mnesia:write(#aws_push_jid{
 		jid = PushJID,
-		seq = Seq,
 		status = true,
 		token = Token,
 		type = Type,
 		arn = Arn
 	}),
-	mnesia:write(#aws_push_jid_seq{
-		jid_seq = {PushJID, Seq},
-		token = Token,
-		type = Type
-	}),
-	mnesia:write(#aws_push_jid_type_token{
-		jid_type_token = {PushJID, Type, Token},
+	mnesia:write(#aws_push_type_token{
+		type_token = {Type, Token},
 		arn = Arn
 	}).
+
+make_message(_Type,Data) ->
+	FirstElement = case application:get_env(erlcloud, apn_sandbox) of
+		               {ok,true} -> 'APNS_SANDBOX';
+					   _ -> 'APNS'
+	               end,
+	Message =
+	"{'" ++
+		atom_to_list(FirstElement)
+		++
+		"':\"{\"aps\":{\"badge\": 2,\"sound\":\"default\",\"alert\":{\"body\": \""
+		++ binary_to_list(Data)
+	++ "\"}}}\"}",
+	Message.
+
+get_attributes() ->
+	{ok, Ttl} = application:get_env(erlcloud, apn_ttl),
+	{ok, Topic} = application:get_env(erlcloud, apn_topic),
+	{ok, PushType} = application:get_env(erlcloud, apn_push_type),
+	ApnTtl = case application:get_env(erlcloud, apn_sandbox) of
+		         {ok, true} ->
+			         [{"AWS.SNS.MOBILE.APNS_SANDBOX.TTL", Ttl}];
+		         _ ->
+			         [{"AWS.SNS.MOBILE.APNS.TTL", Ttl}]
+	         end,
+	[{"AWS.SNS.MOBILE.APNS.TOPIC", Topic},
+		{"AWS.SNS.MOBILE.APNS.PRIORITY", 10},
+		{"AWS.SNS.MOBILE.APNS.PUSH_TYPE", PushType}
+	] ++ ApnTtl.
