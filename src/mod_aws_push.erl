@@ -21,9 +21,9 @@
 
 -export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-	publish/2,
+	publish/3,
 	make_message/2,
-	get_attributes/0,
+	get_attributes/1,
 	code_change/3]).
 
 -define(SERVER, ?MODULE).
@@ -154,8 +154,10 @@ process_offline_message({To, #message{body = [#text{data = Data}] = _Body} = _Pa
 			#aws_push_jid{type = Type, status = Status, arn=Arn} = Item,
 			case Status of
 				true ->
-					Message = make_message(Type, Data),
-					case publish(Arn, Message) of
+					Type2 = binary_to_atom(string:lowercase(Type), unicode),
+					Message = make_message(Type2, Data),
+					Attributes = get_attributes(Type2),
+					case publish(Arn, Message, Attributes) of
 						{ok, _} ->
 							?INFO_MSG("Notification sent.Jid:~p~n", [To]),
 							ok;
@@ -276,8 +278,8 @@ create_platform_endpoint(PlatformAppArn,Token) ->
 	    _:Reason -> {error, Reason}
 	end.
 
-publish(Arn, Message) ->
-	try erlcloud_sns:publish(target, Arn, Message, undefined, get_attributes(), erlcloud_aws:default_config()) of
+publish(Arn, Message, Attributes) ->
+	try erlcloud_sns:publish(target, Arn, Message, undefined, Attributes, erlcloud_aws:default_config()) of
 		Result -> {ok, Result}
 	catch
 		_:Reason -> {error, Reason}
@@ -319,31 +321,38 @@ insert_all_tables(PushJID, Token, Type, Arn) ->
 		arn = Arn
 	}).
 
-make_message(_Type,Data) ->
-	FirstElement = case application:get_env(erlcloud, apn_sandbox) of
-		               {ok,true} -> 'APNS_SANDBOX';
-					   _ -> 'APNS'
-	               end,
-	Message =
-	"{'" ++
-		atom_to_list(FirstElement)
-		++
-		"':\"{\"aps\":{\"badge\": 2,\"sound\":\"default\",\"alert\":{\"body\": \""
-		++ binary_to_list(Data)
-	++ "\"}}}\"}",
-	Message.
+make_message(Type,Data) ->
+	case Type of
+		fcm ->
+			"{'GCM':\"{\"notification\":{\"body\": \"" ++ binary_to_list(Data)
+				++ "\",\"sound\":\"default\"}}\"}";
+		_ ->
+			FirstElement = case application:get_env(erlcloud, apn_sandbox) of
+				               {ok,true} -> 'APNS_SANDBOX';
+				               _ -> 'APNS'
+			               end,
+			"{'" ++ atom_to_list(FirstElement) ++
+				"':\"{\"aps\":{\"badge\": 2,\"sound\":\"default\",\"alert\":{\"body\": \""
+				++ binary_to_list(Data) ++ "\"}}}\"}"
+	end.
 
-get_attributes() ->
-	{ok, Ttl} = application:get_env(erlcloud, apn_ttl),
-	{ok, Topic} = application:get_env(erlcloud, apn_topic),
-	{ok, PushType} = application:get_env(erlcloud, apn_push_type),
-	ApnTtl = case application:get_env(erlcloud, apn_sandbox) of
-		         {ok, true} ->
-			         [{"AWS.SNS.MOBILE.APNS_SANDBOX.TTL", Ttl}];
-		         _ ->
-			         [{"AWS.SNS.MOBILE.APNS.TTL", Ttl}]
-	         end,
-	[{"AWS.SNS.MOBILE.APNS.TOPIC", Topic},
-		{"AWS.SNS.MOBILE.APNS.PRIORITY", 10},
-		{"AWS.SNS.MOBILE.APNS.PUSH_TYPE", PushType}
-	] ++ ApnTtl.
+
+get_attributes(Type) ->
+	case Type of
+		fcm ->
+			[];
+		_ ->
+			{ok, Ttl} = application:get_env(erlcloud, apn_ttl),
+			{ok, Topic} = application:get_env(erlcloud, apn_topic),
+			{ok, PushType} = application:get_env(erlcloud, apn_push_type),
+			ApnTtl = case application:get_env(erlcloud, apn_sandbox) of
+				         {ok, true} ->
+					         [{"AWS.SNS.MOBILE.APNS_SANDBOX.TTL", Ttl}];
+				         _ ->
+					         [{"AWS.SNS.MOBILE.APNS.TTL", Ttl}]
+			         end,
+			[{"AWS.SNS.MOBILE.APNS.TOPIC", Topic},
+				{"AWS.SNS.MOBILE.APNS.PRIORITY", 10},
+				{"AWS.SNS.MOBILE.APNS.PUSH_TYPE", PushType}
+			] ++ ApnTtl
+	end.
