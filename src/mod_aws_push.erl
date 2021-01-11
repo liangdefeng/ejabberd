@@ -1,11 +1,13 @@
 %%%-------------------------------------------------------------------
-%%% @author Peter Leung
-%%% @copyright (C) 2020, Peter Leung
+%%% @author Peter Liang
+%%% @copyright (C) 2020, Peter Liang
 %%% @doc
+%%% The purpose of the module is to allow user to register hit/her device
+%%% to fcm or apns through AWS SNS mobile notification.
 %%%
+%%% When offline message is sent to user, user's device will receive notification.
 %%%
-%%%
-%%%
+%%% User can enable or disable notification.
 %%% @end
 %%%-------------------------------------------------------------------
 -module(mod_aws_push).
@@ -179,70 +181,67 @@ process_offline_message({_To, _Packet}) ->
 	?INFO_MSG("Do nothing!", []),
 	ok.
 
-process_iq(#iq{lang = Lang, sub_els = [#push_enable{jid = PushJID,
+process_iq(#iq{from = From, lang = Lang, sub_els = [#push_enable{jid = _Jid,
 		xdata = #xdata{fields = [
-			#xdata_field{var = <<"type">>, values = [Type]},
-			#xdata_field{var = <<"token">>, values = [Token]}
+			#xdata_field{var = <<"type">>, values = [TypeParam]},
+			#xdata_field{var = <<"token">>, values = [TokenParam]}
 		]}}]} = IQ) ->
+	PushJID = jid:tolower(jid:remove_resource(From)),
+	Type = binary_to_atom(string:lowercase(TypeParam), unicode),
+	Token = string:lowercase(TokenParam),
 	?INFO_MSG("User is registering its device.Jid:~p,Type:~p,Token:~p~n",[PushJID,Type,Token]),
 
 	% Get Platform Arn
-	PlatformAppArn =
-		case Type of
-			<<"apn">> ->
-				{ok, ApnPlatformEndpoint} = application:get_env(erlcloud, apn),
-				ApnPlatformEndpoint;
-			<<"fcm">> ->
-				{ok, FcmPlatformEndpoint} = application:get_env(erlcloud, fcm),
-				FcmPlatformEndpoint;
-			_ ->
-				xmpp:make_error(IQ, xmpp:err_not_allowed())
-		end,
-
-	case mnesia:dirty_read({aws_push_type_token, {Type, Token}}) of
-		[Item] when is_record(Item, aws_push_type_token) ->
-			#aws_push_type_token{arn = Arn} = Item,
-			case mnesia:dirty_read({aws_push_jid, PushJID}) of
-				[Item2] when is_record(Item2, aws_push_jid) ->
-					#aws_push_jid{type = Type2, token = Token2} = Item2,
-					case {Type2, Token2} of
-						{Type, Token} ->
-							% when user use the same device.
-							xmpp:make_iq_result(IQ);
+	case application:get_env(erlcloud, Type) of
+		{ok, PlatformAppArn} ->
+			case mnesia:dirty_read({aws_push_type_token, {Type, Token}}) of
+				[Item] when is_record(Item, aws_push_type_token) ->
+					#aws_push_type_token{arn = Arn} = Item,
+					case mnesia:dirty_read({aws_push_jid, PushJID}) of
+						[Item2] when is_record(Item2, aws_push_jid) ->
+							#aws_push_jid{type = Type2, token = Token2} = Item2,
+							case {Type2, Token2} of
+								{Type, Token} ->
+									% when user use the same device.
+									xmpp:make_iq_result(IQ);
+								_ ->
+									% this will happen when user switch device
+									% insert aws_push_jid_seq table and update aws_push_jid.
+									% Associate the PushJid with the exiting token, type and arn.
+									F = fun() -> update_push_jid(PushJID, Token, Type, Arn) end,
+									transaction(IQ, F)
+							end;
 						_ ->
-							% this will happen when user switch device
-							% insert aws_push_jid_seq table and update aws_push_jid.
-							% Associate the PushJid with the exiting token, type and arn.
-							F = fun() -> update_push_jid(PushJID, Token, Type, Arn) end,
+							F = fun () ->
+								mnesia:write(Item#aws_push_jid{
+									jid = PushJID,
+									type = Type,
+									status = true,
+									token = Token,
+									arn = Arn
+								})
+							    end,
 							transaction(IQ, F)
 					end;
 				_ ->
-					F = fun () ->
-						mnesia:write(Item#aws_push_jid{
-							jid = PushJID,
-							type = Type,
-							status = true,
-							token = Token,
-							arn = Arn
-						})
-					    end,
-					transaction(IQ, F)
+					case create_platform_endpoint(PlatformAppArn,Token) of
+						{ok, Arn} ->
+							% insert aws_push_jid and aws_push_type_token.
+							F = fun() -> insert_all_tables(PushJID, Token, Type, Arn) end,
+							transaction(IQ, F);
+						{error, Reason} ->
+							?ERROR_MSG(
+								"Can't create a new platform endpoint arn. Reason:~p, JId:~p, Type:~p, Token:~p~n",
+								[Reason, PushJID, Type, Token]),
+							Txt = ?T(Reason),
+							xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
+					end
 			end;
 		_ ->
-			case create_platform_endpoint(PlatformAppArn,Token) of
-				{ok, Arn} ->
-					% insert aws_push_jid and aws_push_type_token.
-					F = fun() -> insert_all_tables(PushJID, Token, Type, Arn) end,
-					transaction(IQ, F);
-				{error, Reason} ->
-					?ERROR_MSG(
-						"Can't create a new platform endpoint arn. Reason:~p, JId:~p, Type:~p, Token:~p~n",
-						[Reason, PushJID, Type, Token]),
-					Txt = ?T(Reason),
-					xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang))
-			end
+			xmpp:make_error(IQ, xmpp:err_not_allowed())
 	end;
-process_iq(#iq{lang = _Lang, sub_els = [#push_enable{jid = PushJID}]} = IQ) ->
+process_iq(#iq{from = From, lang = _Lang, sub_els = [#push_enable{jid = _Jid}]} = IQ) ->
+	PushJID = jid:tolower(jid:remove_resource(From)),
 	?INFO_MSG("User has enabled its notification.Jid:~p~n",[PushJID]),
 	F = fun () ->
 			case mnesia:wread({aws_push_jid, PushJID}) of
@@ -255,7 +254,8 @@ process_iq(#iq{lang = _Lang, sub_els = [#push_enable{jid = PushJID}]} = IQ) ->
 			end
 	    end,
 	transaction(IQ, F);
-process_iq(#iq{sub_els = [#push_disable{jid = PushJID}]} = IQ) ->
+process_iq(#iq{from = From, sub_els = [#push_disable{jid = _Jid}]} = IQ) ->
+	PushJID = jid:tolower(jid:remove_resource(From)),
 	?INFO_MSG("User has disabled its notification.Jid:~p~n",[PushJID]),
 	F = fun () ->
 			case mnesia:wread({aws_push_jid, PushJID}) of
