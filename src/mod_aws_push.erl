@@ -26,6 +26,7 @@
 	publish/3,
 	make_message/2,
 	get_attributes/1,
+	disco_sm_features/5,
 	code_change/3]).
 
 -define(SERVER, ?MODULE).
@@ -117,6 +118,7 @@ init([Host, Opts]) ->
 	{ok,_} = application:ensure_all_started(erlcloud),
 
 	gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0, ?MODULE, process_iq),
+	ejabberd_hooks:add(disco_sm_features, Host, ?MODULE, disco_sm_features, 50),
 	ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, offline_message, 70),
 
 	{ok, #mod_aws_push_state{host=Host}}.
@@ -134,11 +136,20 @@ handle_info(_Info, State = #mod_aws_push_state{}) ->
 terminate(_Reason, _State = #mod_aws_push_state{host = Host}) ->
 	application:stop(erlcloud),
 	gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0),
+	ejabberd_hooks:delete(disco_sm_features, Host, ?MODULE, disco_sm_features, 50),
 	ejabberd_hooks:delete(offline_message_hook, Host, ?MODULE, offline_message, 70).
 
 code_change(_OldVsn, State = #mod_aws_push_state{}, _Extra) ->
 	{ok, State}.
 
+disco_sm_features(empty, From, To, Node, Lang) ->
+	disco_sm_features({result, []}, From, To, Node, Lang);
+disco_sm_features({result, OtherFeatures},
+	#jid{luser = U, lserver = S},
+	#jid{luser = U, lserver = S}, <<"">>, _Lang) ->
+	{result, [?NS_PUSH_0 | OtherFeatures]};
+disco_sm_features(Acc, _From, _To, _Node, _Lang) ->
+	Acc.
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
