@@ -8,6 +8,7 @@
 -export([aws_region/1]).
 -export([fcm_platform_endpoint/1]).
 -export([apn_platform_endpoint/1]).
+-export([pushkit_platform_endpoint/1]).
 -export([apn_topic/1]).
 -export([apn_ttl/1]).
 -export([apn_push_type/1]).
@@ -39,5 +40,8 @@ apn_push_type(Opts) when is_map(Opts) ->
 
 apn_sandbox(Opts) when is_map(Opts) ->
     gen_mod:get_opt(apn_sandbox, Opts).
+
+pushkit_platform_endpoint(Opts) when is_map(Opts) ->
+    gen_mod:get_opt(pushkit_platform_endpoint, Opts).
 
 
