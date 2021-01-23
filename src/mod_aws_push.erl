@@ -82,7 +82,8 @@ mod_options(_Host) ->
 		{apn_topic, ""},
 		{apn_ttl, 5},
 		{apn_sandbox, true},
-		{apn_push_type, "alert"}
+		{apn_push_type, "alert"},
+		{pushkit_platform_endpoint, ""}
 	].
 
 mod_doc() ->
@@ -129,8 +130,8 @@ init([Host, Opts]) ->
 handle_call(_Request, _From, State = #mod_aws_push_state{}) ->
 	{reply, ok, State}.
 
-handle_cast({offline_message_received,To, Packet}, State = #mod_aws_push_state{}) ->
-	process_offline_message({To, Packet}),
+handle_cast({offline_message_received,From, To, Packet}, State = #mod_aws_push_state{}) ->
+	process_offline_message({From, To, Packet}),
 	{noreply, State}.
 
 handle_info(_Info, State = #mod_aws_push_state{}) ->
@@ -157,10 +158,10 @@ disco_sm_features(Acc, _From, _To, _Node, _Lang) ->
 %%% Internal functions
 %%%===================================================================
 -spec offline_message({any(), message()}) -> {any(), message()}.
-offline_message({_Action, #message{to = To} = Packet} = _Acc) ->
+offline_message({_Action, #message{from = From, to = To} = Packet} = _Acc) ->
 	?INFO_MSG("User has received an offline message. Jid:~p~n",[To]),
 	Proc = gen_mod:get_module_proc(To#jid.lserver, ?MODULE),
-	gen_server:cast(Proc, {offline_message_received,To, Packet}),
+	gen_server:cast(Proc, {offline_message_received,From, To, Packet}),
 	ok.
 
 process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body} = _Packet}) ->
@@ -195,7 +196,7 @@ process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body}
 			?INFO_MSG("Use has not registered notification.Jid:~p~n", [To]),
 			ok
 	end;
-process_offline_message({To, #message{} = Message}) ->
+process_offline_message({_From, To, #message{} = Message}) ->
 	?INFO_MSG("Do nothing!To:~p Messsage:~p~n", [To, Message]),
 	ok.
 
@@ -404,7 +405,7 @@ make_message(Type,From, Data) ->
 			%	               {ok,true} -> 'APNS_SANDBOX';
 			%	               _ -> 'APNS'
 			%               end,
-			From  ++ "\n" ++ binary_to_list(Data)
+			"Message from " ++ binary_to_list(From)  ++ ":\n" ++ binary_to_list(Data)
 			%% "{'" ++ atom_to_list(FirstElement) ++
 			%% 	"':\"{\"aps\":{\"badge\": 2,\"sound\":\"default\",\"alert\":{\"body\": \""
 			%%	++ binary_to_list(Data) ++ "\"}}}\"}"
@@ -433,6 +434,6 @@ get_attributes(Type) ->
 
 get_token_key(Type, Token, PushKitToken) ->
 	case Type of
-		apn -> Token ++ "#" + PushKitToken;
+		apn -> list_to_binary(binary_to_list(Token) ++ "#" ++ binary_to_list(PushKitToken));
 		_ -> Token
 	end.
