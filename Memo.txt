@@ -1,0 +1,125 @@
+rp(ets:tab2list(aws_push_jid)).
+rp(ets:tab2list(aws_push_type_token)).
+rp(ets:tab2list(aws_push_pushkit_token)).
+
+mnesia:clear_table(aws_push_jid).
+mnesia:clear_table(aws_push_type_token).
+mnesia:clear_table(aws_push_pushkit_token).
+
+
+D:\erl10.4\bin\erlc.exe -o D:\git\ejabberd\out\production\ejabberd -pa D:\git\ejabberd\out\production\ejabberd -pa /git/ejabberd +debug_info -I D:\git\ejabberd\include -I D:\git\ejabberd\lib D:\git\ejabberd\src\mod_aws_push.erl
+D:\erl10.4\bin\erlc.exe -o D:\git\ejabberd\out\production\ejabberd -pa D:\git\ejabberd\out\production\ejabberd -pa /git/ejabberd +debug_info -I D:\git\ejabberd\include -I D:\git\ejabberd\lib D:\git\ejabberd\src\mod_aws_push_opt.erl
+
+
+sudo docker exec -it ejabberd_ejabberd-20.12_1 tail -f logs/ejabberd.log
+sudo docker exec -it ejabberd_ejabberd-20.12_1 bin/ejabberdctl debug
+sudo docker-compose restart ejabberd-20.12
+
+sudo
+
+ssh charles@54.177.49.34
+
+scp mod_aws_push* charles@54.177.49.34:~/
+
+ssh charles@54.177.49.34
+sudo cp mod_aws_push* /var/ejabberd/lib/ejabberd-20.12.0/ebin/
+
+cd /var/ejabberd/
+sudo docker-compose restart ejabberd-20.12
+
+
+IQ
+
+arn:aws:sns:us-west-1:058538655759:app/APNS_SANDBOX/w-4all-apns
+
+<iq type='set' id='x43'>
+  <enable xmlns='urn:xmpp:push:0' jid='test3@localhost' node='test3'>
+    <x xmlns='jabber:x:data' type='submit'>
+      <field var='type'><value>apn</value></field>
+      <field var='token'><value>test3-eruio234vzxc2kla-91</value></field>
+    </x>
+  </enable>
+</iq>
+
+<iq type='set' id='x43'>
+  <enable xmlns='urn:xmpp:push:0' jid='test4@localhost'>
+    <x xmlns='jabber:x:data' type='submit'>
+      <field var='type'><value>apn</value></field>
+      <field var='token'><value>59b70e15ca0f24835b49471e74a9a4095ed3d93bd4642c350c33b309d0b29f5b</value></field>
+    </x>
+  </enable>
+</iq>
+
+
+<iq type='set' id='x44'>
+  <enable xmlns='urn:xmpp:push:0' jid='test4@localhost'/>
+</iq>
+
+<iq type='set' id='x45'>
+  <disable xmlns='urn:xmpp:push:0' jid='test4@localhost'/>
+</iq>
+
+%%make_message(Type,From, Data) ->
+%%	case Type of
+%%		fcm ->
+%%			"{'GCM':\"{\"notification\":{\"body\": \"" ++ binary_to_list(Data)
+%%				++ "\",\"sound\":\"default\"}}\"}";
+%%		_ ->
+%%			% FirstElement = case application:get_env(erlcloud, apn_sandbox) of
+%%			%	               {ok,true} -> 'APNS_SANDBOX';
+%%			%	               _ -> 'APNS'
+%%			%               end,
+%%			%% "{'" ++ atom_to_list(FirstElement) ++
+%%			%% 	"':\"{\"aps\":{\"badge\": 2,\"sound\":\"default\",\"alert\":{\"body\": \""
+%%			%%	++ binary_to_list(Data) ++ "\"}}}\"}"
+%%
+%%			"Message from " ++ binary_to_list(From)  ++ ":\n" ++ binary_to_list(Data)
+%%
+%%	end.
+
+curl -v \
+-d '{"aps":{"alert":"hello"}}' \
+-H "apns-topic: com.w-4all.WorldUnification"  \
+--http2 \
+--cert W-APNS_production.pem \
+https://api.push.apple.com/3/device/3c14d238cb4a35363c57e567a243e7c5fd402be20e47e148422cde5ec86de43c
+
+# Generate a public key file according to W_APNs.p12 file.
+openssl pkcs12 -in W_APNs.p12 -out W_APNs.pem -nocerts -nodes
+
+# Generate a private key file according to W_APNs.p12 file.
+openssl pkcs12 -in W_APNs.p12 -out W_APNs.crt.pem -clcerts -nokeys
+
+# Execute the curl command.
+curl -v --tls-max 1.2 -d '{"aps": { \
+  "alert": { \
+      "title": "Hello Faran", \
+      "body": "Thanks for visiting w-4all.com" \
+   }, \
+  "sound": "default", \
+  "badge": 2 \
+},"aditional-info": "Test"}' \
+-H "apns-topic: com.w-4all.WorldUnification" \
+-H "apns-priority: 10" \
+-E ./W-APNS_production.crt.pem \
+--key ./W-APNS_production.pem \
+--http2 \
+https://api.push.apple.com/3/device/1A8E382E8F28176E00A6DA0B13B089DF9B08E6D280FF39A69310486BFF2D615B
+
+
+curl -v --tls-max 1.2 -d '{"aps": { \
+  "alert": { \
+      "title": "Hello Faran", \
+      "body": "Thanks for visiting w-4all.com" \
+   }, \
+  "sound": "default", \
+  "badge": 2 \
+},"aditional-info": "Test"}' \
+-H "apns-topic: com.w-4all.WorldUnification" \
+-H "apns-priority: 10" \
+-E ./W-APNS_production.crt.pem \
+--key ./W-APNS_production.pem \
+--http2 \
+https://api.push.apple.com/3/device/1A8E382E8F28176E00A6DA0B13B089DF9B08E6D280FF39A69310486BFF2D615B
+
+
