@@ -173,8 +173,7 @@ offline_message({_Action, #message{from = From, to = To} = Packet} = _Acc) ->
 process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body} = _Packet}) ->
 	?INFO_MSG("start to process offline message to ~p~n",[To]),
 	ToJID = jid:tolower(jid:remove_resource(To)),
-	FromJid = jid:to_string(jid:remove_resource(From)),
-	send_notification(FromJid, ToJID, Data, offline);
+	send_notification(From, ToJID, Data, offline);
 process_offline_message({_From, _To, #message{} = _Message}) ->
 	ok.
 
@@ -423,8 +422,7 @@ sm_receive_packet(#message{from = From, to = To} = Pkt) ->
 			#push_notification{xdata = #xdata{fields = [#xdata_field{values=[Type]}]}} = Record,
 			CallType = binary_to_atom(string:lowercase(Type), unicode),
 			ToJID = jid:tolower(jid:remove_resource(To)),
-			FromJid = jid:to_string(jid:remove_resource(From)),
-			send_notification(FromJid, ToJID, <<>>, CallType)
+			send_notification(From, ToJID, <<>>, CallType)
 	end,
 	Pkt;
 sm_receive_packet(Acc) ->
@@ -460,11 +458,15 @@ send_notification(FromJid, ToJid, Data, CalType) ->
 	end.
 
 publish(_PushKitArn, Arn, Type, FromJid, Data, CalType) ->
+
 	Attributes = get_attributes(Type),
+	#jid{user = FromUser} = FromJid,
 	case Type of
 		fcm ->
-			Message = "You have a message from " ++ binary_to_list(FromJid),
-			try erlcloud_sns:publish(target, Arn, Message, undefined, Attributes, erlcloud_aws:default_config()) of
+			Message = "You have a message from " ++ binary_to_list(FromUser),
+			try erlcloud_sns:publish(target, Arn,
+				Message, undefined,
+				Attributes, erlcloud_aws:default_config()) of
 				Result -> {ok, Result}
 			catch
 				_:Reason -> {error, Reason}
@@ -472,16 +474,21 @@ publish(_PushKitArn, Arn, Type, FromJid, Data, CalType) ->
 		_ ->
 			{Arn2, Msg} = case CalType of
 				voice ->
-					Message = "You have a voice call from " ++ binary_to_list(FromJid),
+					Message = "You have a voice call from " ++ binary_to_list(FromUser),
 					{Arn, Message};
 				video ->
-					Message = "You have a video call from " ++ binary_to_list(FromJid),
+					Message = "You have a video call from " ++ binary_to_list(FromUser),
 					{Arn, Message};
 				_ ->
-					Message = "You have a message from " ++ binary_to_list(FromJid) ++ "\n" ++ binary_to_list(Data),
+					Message = "You have a message from "
+						++ binary_to_list(FromUser)
+						++ "\n"
+						++ string:slice(Data, 0, 15),
 					{Arn, Message}
 			end,
-			try erlcloud_sns:publish(target, Arn2, Msg, undefined, Attributes, erlcloud_aws:default_config()) of
+			try erlcloud_sns:publish(target, Arn2,
+				list_to_binary(Msg), undefined,
+				Attributes, erlcloud_aws:default_config()) of
 				Result -> {ok, Result}
 			catch
 				_:Reason -> {error, Reason}
