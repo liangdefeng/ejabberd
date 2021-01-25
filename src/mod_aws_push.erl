@@ -128,7 +128,7 @@ init([Host, Opts]) ->
 	gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0, ?MODULE, process_iq),
 	ejabberd_hooks:add(disco_sm_features, Host, ?MODULE, disco_sm_features, 50),
 	ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, offline_message, 70),
-	ejabberd_hooks:add(sm_receive_packet, Host, ?MODULE, sm_receive_packet, 40),
+	ejabberd_hooks:add(sm_receive_packet, Host, ?MODULE, sm_receive_packet, 70),
 
 	{ok, #mod_aws_push_state{host=Host}}.
 
@@ -145,7 +145,7 @@ handle_info(_Info, State = #mod_aws_push_state{}) ->
 terminate(_Reason, _State = #mod_aws_push_state{host = Host}) ->
 	application:stop(erlcloud),
 	gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0),
-	ejabberd_hooks:delete(sm_receive_packet, Host, ?MODULE, sm_receive_packet, 40),
+	ejabberd_hooks:delete(sm_receive_packet, Host, ?MODULE, sm_receive_packet, 70),
 	ejabberd_hooks:delete(disco_sm_features, Host, ?MODULE, disco_sm_features, 50),
 	ejabberd_hooks:delete(offline_message_hook, Host, ?MODULE, offline_message, 70).
 
@@ -292,6 +292,16 @@ get_attributes(Type) ->
 				{"AWS.SNS.MOBILE.APNS.PUSH_TYPE", PushType}
 			] ++ ApnTtl
 	end.
+
+get_attributes() ->
+	{ok, Ttl} = application:get_env(erlcloud, apn_ttl),
+	{ok, Topic} = application:get_env(erlcloud, apn_topic),
+	VoiceTopic = Topic ++ ".voip",
+	[	{"AWS.SNS.MOBILE.APNS.TTL", Ttl},
+		{"AWS.SNS.MOBILE.APNS.TOPIC", VoiceTopic},
+		{"AWS.SNS.MOBILE.APNS.PRIORITY", 0},
+		{"AWS.SNS.MOBILE.APNS.PUSH_TYPE", "voip"}
+	].
 
 get_arns(Type, Token, PushKitToken) ->
 	case Type of
@@ -457,13 +467,12 @@ send_notification(FromJid, ToJid, Data, CalType) ->
 			ok
 	end.
 
-publish(_PushKitArn, Arn, Type, FromJid, Data, CalType) ->
-
+publish(PushKitArn, Arn, Type, FromJid, Data, CalType) ->
 	Attributes = get_attributes(Type),
 	#jid{user = FromUser} = FromJid,
 	case Type of
 		fcm ->
-			Message = "You have a message from " ++ binary_to_list(FromUser),
+			Message = "You have a call from " ++ binary_to_list(FromUser),
 			try erlcloud_sns:publish(target, Arn,
 				Message, undefined,
 				Attributes, erlcloud_aws:default_config()) of
@@ -474,8 +483,8 @@ publish(_PushKitArn, Arn, Type, FromJid, Data, CalType) ->
 		_ ->
 			{Arn2, Msg} = case CalType of
 				voice ->
-					Message = "You have a voice call from " ++ binary_to_list(FromUser),
-					{Arn, Message};
+					Message = "{\"callerID\":\"" ++ binary_to_list(FromUser) ++ "\"}",
+					{PushKitArn, Message};
 				video ->
 					Message = "You have a video call from " ++ binary_to_list(FromUser),
 					{Arn, Message};
@@ -486,11 +495,31 @@ publish(_PushKitArn, Arn, Type, FromJid, Data, CalType) ->
 						++ string:slice(Data, 0, 15),
 					{Arn, Message}
 			end,
-			try erlcloud_sns:publish(target, Arn2,
-				list_to_binary(Msg), undefined,
-				Attributes, erlcloud_aws:default_config()) of
-				Result -> {ok, Result}
-			catch
-				_:Reason -> {error, Reason}
+
+			case CalType of
+				voice ->
+					%% Send PushKit
+					try
+						%% Send PushKit notification.
+						%% erlcloud_sns:publish(target, Arn2, list_to_binary(Msg), undefined,
+						%% 	get_attributes(), erlcloud_aws:default_config()),
+
+						%% Send notification.
+						Message2 = "You have a voice call from " ++ binary_to_list(FromUser),
+						erlcloud_sns:publish(target, Arn, list_to_binary(Message2), undefined,
+							Attributes, erlcloud_aws:default_config())
+
+					catch
+						_:Reason -> {error, Reason}
+					end;
+				_ ->
+					%% Send notification only.
+					try erlcloud_sns:publish(target, Arn2,
+						list_to_binary(Msg), undefined,
+						Attributes, erlcloud_aws:default_config()) of
+						Result -> {ok, Result}
+					catch
+						_:Reason -> {error, Reason}
+					end
 			end
 	end.
