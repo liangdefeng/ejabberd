@@ -23,7 +23,8 @@
 
 -export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-	publish/6,
+	publish/7,
+	get_attributes/0,
 	get_attributes/1,
 	disco_sm_features/5,
 	sm_receive_packet/1,
@@ -173,7 +174,12 @@ offline_message({_Action, #message{from = From, to = To} = Packet} = _Acc) ->
 process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body} = _Packet}) ->
 	?INFO_MSG("start to process offline message to ~p~n",[To]),
 	ToJID = jid:tolower(jid:remove_resource(To)),
-	send_notification(From, ToJID, Data, offline);
+	case string:slice(Data, 0, 19) of
+		<<"aesgcm://w-4all.com">> ->
+			ok;
+		_ ->
+			send_notification(From, ToJID, Data, offline, missed)
+	end;
 process_offline_message({_From, _To, #message{} = _Message}) ->
 	ok.
 
@@ -292,6 +298,14 @@ get_attributes(Type) ->
 				{"AWS.SNS.MOBILE.APNS.PUSH_TYPE", PushType}
 			] ++ ApnTtl
 	end.
+
+get_attributes() ->
+	[
+		{"AWS.SNS.MOBILE.APNS.TOPIC", "com.w-4all.WorldUnification.voip"},
+		{"AWS.SNS.MOBILE.APNS.PRIORITY", 10},
+		{"AWS.SNS.MOBILE.APNS.TTL", 0},
+		{"AWS.SNS.MOBILE.APNS.PUSH_TYPE", "voip"}
+	].
 
 get_arns(Type, Token, PushKitToken) ->
 	case Type of
@@ -419,16 +433,29 @@ sm_receive_packet(#message{from = From, to = To} = Pkt) ->
 		false ->
 			ok;
 		Record ->
-			#push_notification{xdata = #xdata{fields = [#xdata_field{values=[Type]}]}} = Record,
-			CallType = binary_to_atom(string:lowercase(Type), unicode),
-			ToJID = jid:tolower(jid:remove_resource(To)),
-			send_notification(From, ToJID, <<>>, CallType)
+			?DEBUG("Pkt:~p~n",[Pkt]),
+			case Record of
+				#push_notification{xdata = #xdata{fields = [#xdata_field{values = [Type]}]}} ->
+
+					Type2 = binary_to_atom(string:lowercase(Type), unicode),
+					ToJID = jid:tolower(jid:remove_resource(To)),
+					send_notification(From, ToJID, <<>>, Type2, missed);
+
+				#push_notification{xdata = #xdata{fields = [#xdata_field{var = <<"type">>, values=[Type]},
+					#xdata_field{var = <<"status">>, values = [Status]}]}} ->
+					Type2 = binary_to_atom(string:lowercase(Type), unicode),
+					Status2 = binary_to_atom(string:lowercase(Status), unicode),
+					ToJID = jid:tolower(jid:remove_resource(To)),
+					send_notification(From, ToJID, <<>>, Type2, Status2);
+				_ ->
+					ok
+			end
 	end,
 	Pkt;
 sm_receive_packet(Acc) ->
 	Acc.
 
-send_notification(FromJid, ToJid, Data, CalType) ->
+send_notification(FromJid, ToJid, Data, Type2, CallTypeStatus) ->
 	case mnesia:dirty_read(aws_push_jid, ToJid) of
 		[Item] when is_record(Item, aws_push_jid) ->
 			#aws_push_jid{
@@ -438,14 +465,14 @@ send_notification(FromJid, ToJid, Data, CalType) ->
 				arn=Arn} = Item,
 			case Status of
 				true ->
-					case publish(PushKitArn, Arn, Type, FromJid, Data, CalType) of
+					case publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) of
 						{ok, _} ->
 							?INFO_MSG("Notification sent.Jid:~p~n", [ToJid]),
 							ok;
 						{error, Reason} ->
 							?ERROR_MSG(
-								"Error occurs when sending message to arn. Reason:~p,Arn:~p~n",
-								[Reason, Arn]),
+								"Error occurs when sending message to arn. Reason:~p,Arn:~p,PushKitArn~p~n",
+								[Reason, Arn, PushKitArn]),
 							ok
 					end;
 				_ ->
@@ -457,40 +484,151 @@ send_notification(FromJid, ToJid, Data, CalType) ->
 			ok
 	end.
 
-publish(_PushKitArn, Arn, Type, FromJid, Data, CalType) ->
+publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 
-	Attributes = get_attributes(Type),
 	#jid{user = FromUser} = FromJid,
 	case Type of
 		fcm ->
 			Message = "You have a message from " ++ binary_to_list(FromUser),
-			try erlcloud_sns:publish(target, Arn,
+			try erlcloud_sns:publ(target, Arn,
 				Message, undefined,
-				Attributes, erlcloud_aws:default_config()) of
+				get_attributes(Type), erlcloud_aws:default_config()) of
 				Result -> {ok, Result}
 			catch
 				_:Reason -> {error, Reason}
 			end;
 		_ ->
-			{Arn2, Msg} = case CalType of
-				voice ->
-					Message = "You have a voice call from " ++ binary_to_list(FromUser),
-					{Arn, Message};
-				video ->
-					Message = "You have a video call from " ++ binary_to_list(FromUser),
-					{Arn, Message};
+			{Arn2, Msg} =
+				case Type2 of
+					location ->
+						Message = "{\"APNS\":" ++
+							"\"{\\\"aps\\\":{\\\"badge\\\":7," ++
+							"\\\"soundid\\\":\\\"1007\\\"," ++
+							"\\\"content-available\\\":1," ++
+							"\\\"alert\\\":{\\\"title\\\":\\\""
+							++ "You've received a location message from "
+							++ binary_to_list(FromUser)
+							++ "\\\"}}}\"}",
+						{Arn, Message};
+					photo ->
+						Message = "{\"APNS\":" ++
+							"\"{\\\"aps\\\":{\\\"badge\\\":6," ++
+							"\\\"soundid\\\":\\\"1006\\\"," ++
+							"\\\"content-available\\\":1," ++
+							"\\\"alert\\\":{\\\"title\\\":\\\""
+							++ "You've received a photo message from "
+							++ binary_to_list(FromUser)
+							++ "\\\"}}}\"}",
+						{Arn, Message};
+					files ->
+						Message = "{\"APNS\":" ++
+							"\"{\\\"aps\\\":{\\\"badge\\\":3," ++
+							"\\\"soundid\\\":\\\"1003\\\"," ++
+							"\\\"content-available\\\":1," ++
+							"\\\"alert\\\":{\\\"title\\\":\\\""
+							++ "You've received a file message from "
+							++ binary_to_list(FromUser)
+							++ "\\\"}}}\"}",
+						{Arn, Message};
+					voice ->
+						Message =
+							case CallTypeStatus of
+								start ->
+									"{\"APNS_VOIP\":" ++
+										"\"{\\\"aps\\\":{\\\"badge\\\":4," ++
+										"\\\"soundid\\\":\\\"1004\\\"," ++
+										"\\\"content-available\\\":1," ++
+										"\\\"alert\\\":{\\\"title\\\":\\\""
+										++ "You've received a voice call from "
+										++ binary_to_list(FromUser)
+										++ "\\\"}}}\"}";
+								missed ->
+									"{\"APNS\":" ++
+										"\"{\\\"aps\\\":{\\\"badge\\\":4," ++
+										"\\\"soundid\\\":\\\"1004\\\"," ++
+										"\\\"content-available\\\":1," ++
+										"\\\"alert\\\":{\\\"title\\\":\\\""
+										++ "You've missed a voice call from "
+										++ binary_to_list(FromUser)
+										++ "\\\"}}}\"}";
+								_ ->
+									"{\"APNS\":" ++
+										"\"{\\\"aps\\\":{\\\"badge\\\":1," ++
+										"\\\"soundid\\\":\\\"1001\\\"," ++
+										"\\\"content-available\\\":1," ++
+										"\\\"alert\\\":{\\\"title\\\":\\\""
+										++ "You've received a voice message from "
+										++ binary_to_list(FromUser)
+										++ "\\\"}}}\"}"
+							end,
+						{Arn, Message};
+					video ->
+						Message =
+							case CallTypeStatus of
+								start ->
+									"{\"APNS_VOIP\":" ++
+										"\"{\\\"aps\\\":{\\\"badge\\\":5," ++
+										"\\\"soundid\\\":\\\"1005\\\"," ++
+										"\\\"content-available\\\":1," ++
+										"\\\"alert\\\":{\\\"title\\\":\\\""
+										++ "You've received a video call from "
+										++ binary_to_list(FromUser)
+										++ "\\\"}}}\"}";
+								missed ->
+									"{\"APNS\":" ++
+										"\"{\\\"aps\\\":{\\\"badge\\\":5," ++
+										"\\\"soundid\\\":\\\"1005\\\"," ++
+										"\\\"content-available\\\":1," ++
+										"\\\"alert\\\":{\\\"title\\\":\\\""
+										++ "You've missed a video call from "
+										++ binary_to_list(FromUser)
+										++ "\\\"}}}\"}";
+								_ ->
+									"{\"APNS\":" ++
+										"\"{\\\"aps\\\":{\\\"badge\\\":2," ++
+										"\\\"soundid\\\":\\\"1002\\\"," ++
+										"\\\"content-available\\\":1," ++
+										"\\\"alert\\\":{\\\"title\\\":\\\""
+										++ "You've received a video message from "
+										++ binary_to_list(FromUser)
+										++ "\\\"}}}\"}"
+								end,
+						{Arn, Message};
+					_ ->
+						[Data2 | _Rest] = string:split(Data, "\n"),
+						Len = string:length(Data2),
+						Data3 = if Len > 15 -> string:slice(binary_to_list(Data2),0,15) ++ "...";
+											true -> binary_to_list(Data2)
+										end,
+						Message = "{\"APNS\":" ++
+							"\"{\\\"aps\\\":{\\\"badge\\\":10," ++
+							"\\\"soundid\\\":\\\"1000\\\"," ++
+							"\\\"content-available\\\":1," ++
+							"\\\"alert\\\":{" ++
+							"\\\"title\\\":\\\"" ++
+							"You've received a text message from "
+							++ binary_to_list(FromUser)
+							++ "\\\",\\\"body\\\":\\\""
+							++ Data3
+							++ "\\\"}}}\"}",
+						?DEBUG("Data:~p~n",[Message]),
+						{Arn, Message}
+				end,
+			case CallTypeStatus of
+				start ->
+					try erlcloud_sns:publish(target, PushKitArn,
+						Msg, undefined, get_attributes(), erlcloud_aws:default_config()) of
+						Result -> {ok, Result}
+					catch
+						_:Reason -> {error, Reason}
+					end;
 				_ ->
-					Message = "You have a message from "
-						++ binary_to_list(FromUser)
-						++ "\n"
-						++ string:slice(Data, 0, 15),
-					{Arn, Message}
-			end,
-			try erlcloud_sns:publish(target, Arn2,
-				list_to_binary(Msg), undefined,
-				Attributes, erlcloud_aws:default_config()) of
-				Result -> {ok, Result}
-			catch
-				_:Reason -> {error, Reason}
+					try erlcloud_sns:publish(target, Arn2,
+						list_to_binary(Msg), undefined,
+						get_attributes(Type), erlcloud_aws:default_config()) of
+						Result -> {ok, Result}
+					catch
+						_:Reason -> {error, Reason}
+					end
 			end
 	end.
