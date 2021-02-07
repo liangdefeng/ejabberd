@@ -171,7 +171,7 @@ offline_message({_Action, #message{from = From, to = To} = Packet} = _Acc) ->
 	gen_server:cast(Proc, {offline_message_received,From, To, Packet}),
 	ok.
 
-process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body} = Packet}) ->
+process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body} = _Packet}) ->
 	?INFO_MSG("start to process offline message to ~p~n",[To]),
 	ToJID = jid:tolower(jid:remove_resource(To)),
 	case string:slice(Data, 0, 19) of
