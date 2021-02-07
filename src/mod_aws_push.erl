@@ -171,7 +171,7 @@ offline_message({_Action, #message{from = From, to = To} = Packet} = _Acc) ->
 	gen_server:cast(Proc, {offline_message_received,From, To, Packet}),
 	ok.
 
-process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body} = _Packet}) ->
+process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body} = Packet}) ->
 	?INFO_MSG("start to process offline message to ~p~n",[To]),
 	ToJID = jid:tolower(jid:remove_resource(To)),
 	case string:slice(Data, 0, 19) of
@@ -180,7 +180,32 @@ process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body}
 		_ ->
 			send_notification(From, ToJID, Data, offline, missed)
 	end;
-process_offline_message({_From, _To, #message{} = _Message}) ->
+process_offline_message({From, To, #message{} = Pkt}) ->
+	case xmpp:try_subtag(Pkt, #push_notification{}) of
+		false ->
+			ok;
+		Record ->
+			?DEBUG("Pkt:~p~n",[Pkt]),
+			case Record of
+				#push_notification{xdata = #xdata{fields = [#xdata_field{var = <<"type">>, values=[Type]},
+					#xdata_field{var = <<"status">>, values = [StatusBinary]}]}} ->
+
+					Status = binary_to_atom(string:lowercase(StatusBinary), unicode),
+					case Status of
+						start ->
+							?DEBUG("Status is start, do nothing when user offline.~n",[]),
+							ok;
+						_ ->
+							?DEBUG("Status is not start, send offfline notification.~n",[]),
+							Type2 = binary_to_atom(string:lowercase(Type), unicode),
+							ToJID = jid:tolower(jid:remove_resource(To)),
+							send_notification(From, ToJID, <<>>, Type2, Status)
+					end;
+				_ ->
+					ok
+			end
+	end;
+process_offline_message(_) ->
 	ok.
 
 process_iq(#iq{from = From, lang = Lang, sub_els = [#push_enable{jid = _Jid,
@@ -435,19 +460,16 @@ sm_receive_packet(#message{from = From, to = To} = Pkt) ->
 		Record ->
 			?DEBUG("Pkt:~p~n",[Pkt]),
 			case Record of
-				#push_notification{xdata = #xdata{fields = [#xdata_field{values = [Type]}]}} ->
-
-					Type2 = binary_to_atom(string:lowercase(Type), unicode),
-					ToJID = jid:tolower(jid:remove_resource(To)),
-					send_notification(From, ToJID, <<>>, Type2, missed);
-
 				#push_notification{xdata = #xdata{fields = [#xdata_field{var = <<"type">>, values=[Type]},
-					#xdata_field{var = <<"status">>, values = [Status]}]}} ->
+					#xdata_field{var = <<"status">>, values = [<<"start">>]}]}} ->
+
+					?DEBUG("status is start, send pushkit notification.~n",[]),
 					Type2 = binary_to_atom(string:lowercase(Type), unicode),
-					Status2 = binary_to_atom(string:lowercase(Status), unicode),
 					ToJID = jid:tolower(jid:remove_resource(To)),
-					send_notification(From, ToJID, <<>>, Type2, Status2);
+					send_notification(From, ToJID, <<>>, Type2, start);
 				_ ->
+
+					?DEBUG("Status is start, do nothing when user online.~n",[]),
 					ok
 			end
 	end,
