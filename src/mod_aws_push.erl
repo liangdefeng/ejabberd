@@ -567,10 +567,10 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 								missed ->
 									"{\"APNS\":" ++
 										"\"{\\\"aps\\\":{\\\"badge\\\":4," ++
-										"\\\"soundId\\\":\\\"1152\\\"," ++
+										"\\\"soundId\\\":\\\"1150\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've missed a voice call from "
+										++ "You've receive a voice call from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}";
 								_ ->
@@ -590,7 +590,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 								start ->
 									"{\"APNS_VOIP\":" ++
 										"\"{\\\"aps\\\":{\\\"badge\\\":5," ++
-										"\\\"soundId\\\":\\\"1005\\\"," ++
+										"\\\"soundId\\\":\\\"1152\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "You've received a video call from "
@@ -599,10 +599,10 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 								missed ->
 									"{\"APNS\":" ++
 										"\"{\\\"aps\\\":{\\\"badge\\\":5," ++
-										"\\\"soundId\\\":\\\"1005\\\"," ++
+										"\\\"soundId\\\":\\\"1152\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've missed a video call from "
+										++ "You've received a video call from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}";
 								_ ->
@@ -624,7 +624,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 										end,
 						Message = "{\"APNS\":" ++
 							"\"{\\\"aps\\\":{\\\"badge\\\":10," ++
-							"\\\"soundid\\\":\\\"1002\\\"," ++
+							"\\\"soundId\\\":\\\"1002\\\"," ++
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{" ++
 							"\\\"title\\\":\\\"" ++
@@ -640,7 +640,9 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 				start ->
 					try erlcloud_sns:publish(target, PushKitArn,
 						Msg, undefined, get_attributes(), erlcloud_aws:default_config()) of
-						Result -> {ok, Result}
+						Result ->
+							?INFO_MSG("PushKit published.From:~p, MessageId:~p~n", [jid:to_string(FromUser), Result]),
+							{ok, Result}
 					catch
 						_:Reason -> {error, Reason}
 					end;
@@ -648,7 +650,9 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 					try erlcloud_sns:publish(target, Arn2,
 						list_to_binary(Msg), undefined,
 						get_attributes(Type), erlcloud_aws:default_config()) of
-						Result -> {ok, Result}
+						Result ->
+							?INFO_MSG("Notification published.From:~p, MessageId:~p~n", [jid:to_string(FromUser), Result]),
+							{ok, Result}
 					catch
 						_:Reason -> {error, Reason}
 					end
