@@ -525,7 +525,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 					location ->
 						Message = "{\"APNS\":" ++
 							"\"{\\\"aps\\\":{\\\"badge\\\":7," ++
-							"\\\"soundId\\\":\\\"1007\\\"," ++
+							"\\\"sound\\\":\\\"default\\\"," ++
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{\\\"title\\\":\\\""
 							++ "You've received a location message from "
@@ -535,7 +535,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 					photo ->
 						Message = "{\"APNS\":" ++
 							"\"{\\\"aps\\\":{\\\"badge\\\":6," ++
-							"\\\"soundId\\\":\\\"1018\\\"," ++
+							"\\\"sound\\\":\\\"default\\\"," ++
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{\\\"title\\\":\\\""
 							++ "You've received a photo message from "
@@ -545,7 +545,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 					files ->
 						Message = "{\"APNS\":" ++
 							"\"{\\\"aps\\\":{\\\"badge\\\":3," ++
-							"\\\"soundId\\\":\\\"1018\\\"," ++
+							"\\\"sound\\\":\\\"default\\\"," ++
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{\\\"title\\\":\\\""
 							++ "You've received a file message from "
@@ -558,7 +558,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 								start ->
 									"{\"APNS_VOIP\":" ++
 										"\"{\\\"aps\\\":{\\\"badge\\\":4," ++
-										"\\\"soundId\\\":\\\"1150\\\"," ++
+										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "You've received a voice call from "
@@ -567,16 +567,16 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 								missed ->
 									"{\"APNS\":" ++
 										"\"{\\\"aps\\\":{\\\"badge\\\":4," ++
-										"\\\"soundId\\\":\\\"1150\\\"," ++
+										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've receive a voice call from "
+										++ "You've missed a voice call from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}";
 								_ ->
 									"{\"APNS\":" ++
 										"\"{\\\"aps\\\":{\\\"badge\\\":1," ++
-										"\\\"soundId\\\":\\\"1010\\\"," ++
+										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "You've received a voice message from "
@@ -590,7 +590,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 								start ->
 									"{\"APNS_VOIP\":" ++
 										"\"{\\\"aps\\\":{\\\"badge\\\":5," ++
-										"\\\"soundId\\\":\\\"1152\\\"," ++
+										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "You've received a video call from "
@@ -599,16 +599,16 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 								missed ->
 									"{\"APNS\":" ++
 										"\"{\\\"aps\\\":{\\\"badge\\\":5," ++
-										"\\\"soundId\\\":\\\"1152\\\"," ++
+										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've received a video call from "
+										++ "You've missed a video call from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}";
 								_ ->
 									"{\"APNS\":" ++
 										"\"{\\\"aps\\\":{\\\"badge\\\":2," ++
-										"\\\"soundId\\\":\\\"1262\\\"," ++
+										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "You've received a video message from "
@@ -624,7 +624,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 										end,
 						Message = "{\"APNS\":" ++
 							"\"{\\\"aps\\\":{\\\"badge\\\":10," ++
-							"\\\"soundId\\\":\\\"1002\\\"," ++
+							"\\\"sound\\\":\\\"default\\\"," ++
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{" ++
 							"\\\"title\\\":\\\"" ++
@@ -641,7 +641,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 					try erlcloud_sns:publish(target, PushKitArn,
 						Msg, undefined, get_attributes(), erlcloud_aws:default_config()) of
 						Result ->
-							?INFO_MSG("PushKit published.From:~p, MessageId:~p~n", [jid:to_string(FromUser), Result]),
+							?INFO_MSG("PushKit published.MessageId:~p~n", [Result]),
 							{ok, Result}
 					catch
 						_:Reason -> {error, Reason}
@@ -651,7 +651,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 						list_to_binary(Msg), undefined,
 						get_attributes(Type), erlcloud_aws:default_config()) of
 						Result ->
-							?INFO_MSG("Notification published.From:~p, MessageId:~p~n", [jid:to_string(FromUser), Result]),
+							?INFO_MSG("Notification published.MessageId:~p~n", [Result]),
 							{ok, Result}
 					catch
 						_:Reason -> {error, Reason}
