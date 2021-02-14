@@ -28,11 +28,13 @@
 	get_attributes/1,
 	disco_sm_features/5,
 	sm_receive_packet/1,
+	muc_filter_message/3,
 	code_change/3]).
 
 -define(SERVER, ?MODULE).
 
 -include_lib("xmpp/include/xmpp.hrl").
+-include("mod_muc_room.hrl").
 -include("logger.hrl").
 -include("translate.hrl").
 
@@ -127,9 +129,11 @@ init([Host, Opts]) ->
 
 
 	gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0, ?MODULE, process_iq),
+
 	ejabberd_hooks:add(disco_sm_features, Host, ?MODULE, disco_sm_features, 50),
 	ejabberd_hooks:add(offline_message_hook, Host, ?MODULE, offline_message, 70),
 	ejabberd_hooks:add(sm_receive_packet, Host, ?MODULE, sm_receive_packet, 40),
+	ejabberd_hooks:add(muc_filter_message, Host, ?MODULE, muc_filter_message, 60),
 
 	{ok, #mod_aws_push_state{host=Host}}.
 
@@ -146,10 +150,10 @@ handle_info(_Info, State = #mod_aws_push_state{}) ->
 terminate(_Reason, _State = #mod_aws_push_state{host = Host}) ->
 	application:stop(erlcloud),
 	gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_PUSH_0),
+	ejabberd_hooks:delete(muc_filter_message, Host, ?MODULE, muc_filter_message, 60),
 	ejabberd_hooks:delete(sm_receive_packet, Host, ?MODULE, sm_receive_packet, 40),
 	ejabberd_hooks:delete(disco_sm_features, Host, ?MODULE, disco_sm_features, 50),
 	ejabberd_hooks:delete(offline_message_hook, Host, ?MODULE, offline_message, 70).
-
 
 code_change(_OldVsn, State = #mod_aws_push_state{}, _Extra) ->
 	{ok, State}.
@@ -165,6 +169,38 @@ disco_sm_features(Acc, _From, _To, _Node, _Lang) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+-spec muc_filter_message(message(), mod_muc_room:state(), binary()) -> message().
+muc_filter_message(#message{from = From, body = [#text{data = Data}] = _Body} = Pkt,
+		#state{subscribers = Subscribers, users = Users} = _MUCState,
+		_FromNick) ->
+	case has_body_data(Pkt) of
+		true ->
+			Users2 = [ string:lowercase(Res) || #jid{lresource = Res} <- Users],
+			Subscribers2 = [ User || #jid{luser = User} <- Subscribers],
+			#jid{lserver = Server} = From,
+
+			lists:foreach(fun(User2) ->
+					case lists:member(User2, Users2) of
+						false ->
+							ToJid = jid:encode(jid:tolower(jid:make(User2, Server))),
+							send_notification(From, ToJid, Data, offline, missed);
+						_ ->
+							false
+					end
+				end, Subscribers2),
+			Pkt;
+		_ ->
+			Pkt
+	end;
+muc_filter_message(Acc, _MUCState, _FromNick) ->
+	Acc.
+
+-spec has_body_data(message()) -> boolean().
+has_body_data(#message{body = [#text{data = Data}] = _Body}) ->
+	Data /= [].
+
+
 -spec offline_message({any(), message()}) -> {any(), message()}.
 offline_message({_Action, #message{from = From, to = To} = Packet} = _Acc) ->
 	Proc = gen_mod:get_module_proc(To#jid.lserver, ?MODULE),
