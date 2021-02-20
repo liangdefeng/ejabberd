@@ -42,57 +42,55 @@
 -include_lib("xmerl/include/xmerl.hrl").
 -include("logger.hrl").
 
+-define(CONTENT_TYPE, "application/soap+xml; charset=utf-8").
+-define(XML_PROLOG, "<?xml version=\"1.0\" encoding=\"utf-8\"?>").
+-define(XMLNS_XSI, "http://www.w3.org/2001/XMLSchema-instance").
+-define(XMLNS_XSD, "http://www.w3.org/2001/XMLSchema").
+-define(XMLNS_SOAP12, "http://www.w3.org/2003/05/soap-envelope").
+-define(XMLNS, "http://www.mybiodentity.com/").
+
 %%%----------------------------------------------------------------------
 %%% API
 %%%----------------------------------------------------------------------
 start(_Host) -> ok.
 stop(_Host) -> ok.
 
+%% call back method of ejabberd_auth
 plain_password_required(_Host) -> true.
-
+%% call back method of ejabberd_auth
 store_type(_Host) -> external.
-
-check_password(User, AuthzId, Server, Token) ->
+%% call back method of ejabberd_auth
+check_password(User, AuthzId, _Server, Token) ->
   if AuthzId /= <<>> andalso AuthzId /= User -> {nocache, false};
     true ->
       if Token == <<"">> -> {nocache, false};
         true ->
           Res = check_user_token(User, Token),
-          Rule = ejabberd_option:jwt_auth_only_rule(Server),
-          case acl:match_rule(Server, Rule, jid:make(User, Server, <<"">>)) of
-            deny ->
-              {nocache, Res};
-            allow ->
-              {nocache, {stop, Res}}
-          end
+          {nocache, {stop, Res}}
       end
   end.
-
+%% call back method of ejabberd_auth
 user_exists(_User, _Host) -> {nocache, false}.
-
+%% call back method of ejabberd_auth
 use_cache(_) ->
   false.
 
 %%%----------------------------------------------------------------------
 %%% Internal functions
 %%%----------------------------------------------------------------------
+%% Call CheckIMEIbyToken in https://mybiodentity.com/finger/FPrint.asmx to verify the username and token.
 check_user_token(User, Token) ->
   ?DEBUG("check_user_token start. User:~p, Token:~p~n", [User, Token]),
-  _AppName = "bioChat Android",
-  _SecretKey = "asd923rfn32asf9dns",
   send_request(User, Token).
 
+%% Send request to https://mybiodentity.com/finger/FPrint.asmx
 send_request(User, Token) ->
   ?DEBUG("send_request start", []),
   Url = ejabberd_option:ext_auth_url(),
-  Method = post,
-  Headers = [],
-  ContentType = "application/soap+xml; charset=utf-8",
+  ContentType = ?CONTENT_TYPE,
   Body = generate_body(User, Token),
-  Request = {Url, Headers, ContentType, Body},
-  HTTPOptions = [],
-  Options = [],
-  case httpc:request(Method, Request, HTTPOptions, Options) of
+  Request = {Url, [], ContentType, Body},
+  case httpc:request(post, Request, [], []) of
     {ok, Result} ->
       {{_, HttpStatusCode, _}, _, ResultBody} = Result,
       case HttpStatusCode of
@@ -104,7 +102,7 @@ send_request(User, Token) ->
               false
           end;
         _ ->
-          ?WARNING_MSG("Http code isn't 200. http_code:~p~n", [HttpStatusCode]),
+          ?WARNING_MSG("http_code:~p~n", [HttpStatusCode]),
           false
       end;
     {error, Reason} ->
@@ -119,19 +117,15 @@ generate_body(User, Token) ->
   ?DEBUG("generate_body start", []),
   AppName = ejabberd_option:ext_auth_app_name(),
   SecretKey = ejabberd_option:ext_auth_secret_key(),
-  Prolog = ["<?xml version=\"1.0\" encoding=\"utf-8\"?>"],
+  Prolog = [?XML_PROLOG],
   Xml = #xmlElement{
     name = 'soap12:Envelope',
-    attributes = [
-      {'xmlns:xsi', "http://www.w3.org/2001/XMLSchema-instance"},
-      {'xmlns:xsd', "http://www.w3.org/2001/XMLSchema"},
-      {'xmlns:soap12', "http://www.w3.org/2003/05/soap-envelope"}
-    ],
+    attributes = [{'xmlns:xsi', ?XMLNS_XSI}, {'xmlns:xsd', ?XMLNS_XSD}, {'xmlns:soap12', ?XMLNS_SOAP12}],
     content = [#xmlElement{
       name = 'soap12:Body',
       content = [#xmlElement{
         name = 'CheckIMEIbyToken',
-        attributes = [{'xmlns', "http://www.mybiodentity.com/"}],
+        attributes = [{'xmlns', ?XMLNS}],
         content = [
           {'imei', [#xmlText{value = User, type = cdata}]},
           {'token', [#xmlText{value = Token, type = cdata}]},
@@ -146,8 +140,7 @@ generate_body(User, Token) ->
 extract_result(ResultBody) ->
   ?DEBUG("extract_result start", []),
   try
-    {
-      #xmlElement{
+    {#xmlElement{
         content = [#xmlElement{
           content = [#xmlElement{
             content = [#xmlElement{
@@ -157,9 +150,7 @@ extract_result(ResultBody) ->
             }]
           }]
         }]
-      },
-      _Rest
-    } = xmerl_scan:string(ResultBody),
+      }, _Rest} = xmerl_scan:string(ResultBody),
     list_to_atom(string:lowercase(ResultContent))
   catch
     Class:Reason ->
