@@ -453,8 +453,16 @@ opt_type(jwt_key) ->
       end);
 opt_type(jwt_jid_field) ->
     econf:binary();
+opt_type(ext_auth_url) ->
+  econf:string();
+opt_type(ext_auth_app_name) ->
+  econf:string();
+opt_type(ext_auth_secret_key) ->
+  econf:string();
 opt_type(jwt_auth_only_rule) ->
     econf:atom().
+
+
 
 %% We only define the types of options that cannot be derived
 %% automatically by tools/opt_type.sh script
@@ -690,6 +698,9 @@ options() ->
      {websocket_ping_interval, timer:seconds(60)},
      {websocket_timeout, timer:minutes(5)},
      {jwt_key, undefined},
+      {ext_auth_url, undefined},
+      {ext_auth_app_name, undefined},
+      {ext_auth_secret_key, undefined},
      {jwt_jid_field, <<"jid">>},
      {jwt_auth_only_rule, none}].
 
@@ -757,6 +768,9 @@ globals() ->
      version,
      websocket_origin,
      websocket_ping_interval,
+      ext_auth_url,
+      ext_auth_app_name,
+      ext_auth_secret_key,
      websocket_timeout].
 
 doc() ->

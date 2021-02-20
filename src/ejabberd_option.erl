@@ -161,6 +161,9 @@
 -export([websocket_origin/0]).
 -export([websocket_ping_interval/0]).
 -export([websocket_timeout/0]).
+-export([ext_auth_url/0]).
+-export([ext_auth_app_name/0]).
+-export([ext_auth_secret_key/0]).
 
 -spec access_rules() -> [{atom(),acl:access()}].
 access_rules() ->
@@ -1081,4 +1084,16 @@ websocket_ping_interval() ->
 -spec websocket_timeout() -> pos_integer().
 websocket_timeout() ->
     ejabberd_config:get_option({websocket_timeout, global}).
+
+-spec ext_auth_url() -> string().
+ext_auth_url() ->
+    ejabberd_config:get_option({ext_auth_url, global}).
+
+-spec ext_auth_app_name() -> string().
+ext_auth_app_name() ->
+    ejabberd_config:get_option({ext_auth_app_name, global}).
+
+-spec ext_auth_secret_key() -> string().
+ext_auth_secret_key() ->
+    ejabberd_config:get_option({ext_auth_secret_key, global}).
 
