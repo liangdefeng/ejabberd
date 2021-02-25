@@ -35,6 +35,7 @@
   user_exists/2,
   send_request/2,
   generate_body/2,
+  encrypt/1,
   use_cache/1
 ]).
 
@@ -48,6 +49,8 @@
 -define(XMLNS_XSD, "http://www.w3.org/2001/XMLSchema").
 -define(XMLNS_SOAP12, "http://www.w3.org/2003/05/soap-envelope").
 -define(XMLNS, "http://www.mybiodentity.com/").
+-define(AES_KEY, <<"w5u#Rva6GCQsTKK33!oUbaPv7Ub3K2Z7">>).
+-define(AES_IV, <<"eAjo#Thgk!3zhxrv">>).
 
 %%%----------------------------------------------------------------------
 %%% API
@@ -78,15 +81,15 @@ use_cache(_) ->
 %%%----------------------------------------------------------------------
 %%% Internal functions
 %%%----------------------------------------------------------------------
-%% Call CheckIMEIbyToken in https://mybiodentity.com/finger/FPrint.asmx to verify the username and token.
+%% Call CheckIMEIbyToken to verify the username and token.
 check_user_token(User, Token) ->
   ?DEBUG("check_user_token start. User:~p, Token:~p~n", [User, Token]),
   send_request(User, Token).
 
-%% Send request to https://mybiodentity.com/finger/FPrint.asmx
+%% Send request to URL
 send_request(User, Token) ->
   ?DEBUG("send_request start", []),
-  Url = ejabberd_option:ext_auth_url(),
+  Url = decrypt(ejabberd_option:ext_auth_url()),
   ContentType = ?CONTENT_TYPE,
   Body = generate_body(User, Token),
   Request = {Url, [], ContentType, Body},
@@ -115,8 +118,8 @@ send_request(User, Token) ->
 
 generate_body(User, Token) ->
   ?DEBUG("generate_body start", []),
-  AppName = ejabberd_option:ext_auth_app_name(),
-  SecretKey = ejabberd_option:ext_auth_secret_key(),
+  AppName = decrypt(ejabberd_option:ext_auth_app_name()),
+  SecretKey = decrypt(ejabberd_option:ext_auth_secret_key()),
   Prolog = [?XML_PROLOG],
   Xml = #xmlElement{
     name = 'soap12:Envelope',
@@ -157,3 +160,9 @@ extract_result(ResultBody) ->
       ?WARNING_MSG("Error occurs. class:~p, reason:~p~n", [Class, Reason]),
       error
   end.
+
+decrypt(Data) ->
+  binary_to_list(crypto:block_decrypt(aes_cfb8, ?AES_KEY, ?AES_IV, base64:decode(Data))).
+
+encrypt(Data) ->
+  base64:encode(crypto:block_encrypt(aes_cfb8, ?AES_KEY, ?AES_IV, Data)).
