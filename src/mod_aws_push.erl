@@ -528,7 +528,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 							"\\\"sound\\\":\\\"default\\\"," ++
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{\\\"title\\\":\\\""
-							++ "You've received a location message from "
+							++ "Location message from "
 							++ binary_to_list(FromUser)
 							++ "\\\"}}}\"}",
 						{Arn, Message};
@@ -538,7 +538,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 							"\\\"sound\\\":\\\"default\\\"," ++
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{\\\"title\\\":\\\""
-							++ "You've received a photo message from "
+							++ "Photo message from "
 							++ binary_to_list(FromUser)
 							++ "\\\"}}}\"}",
 						{Arn, Message};
@@ -548,7 +548,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 							"\\\"sound\\\":\\\"default\\\"," ++
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{\\\"title\\\":\\\""
-							++ "You've received a file message from "
+							++ "File message from "
 							++ binary_to_list(FromUser)
 							++ "\\\"}}}\"}",
 						{Arn, Message};
@@ -561,7 +561,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've received a voice call from "
+										++ "Voice call from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}";
 								missed ->
@@ -570,7 +570,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've missed a voice call from "
+										++ "Missed a voice call from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}";
 								_ ->
@@ -579,7 +579,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've received a voice message from "
+										++ "Voice message from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}"
 							end,
@@ -593,7 +593,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've received a video call from "
+										++ "Video call from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}";
 								missed ->
@@ -602,7 +602,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've missed a video call from "
+										++ "Missed a video call from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}";
 								_ ->
@@ -611,7 +611,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 										"\\\"sound\\\":\\\"default\\\"," ++
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
-										++ "You've received a video message from "
+										++ "Video message from "
 										++ binary_to_list(FromUser)
 										++ "\\\"}}}\"}"
 								end,
@@ -628,7 +628,7 @@ publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{" ++
 							"\\\"title\\\":\\\"" ++
-							"You've received a text message from "
+							"Text message from "
 							++ binary_to_list(FromUser)
 							++ "\\\",\\\"body\\\":\\\""
 							++ Data3
