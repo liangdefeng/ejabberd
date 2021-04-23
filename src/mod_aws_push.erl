@@ -171,14 +171,43 @@ offline_message({_Action, #message{from = From, to = To} = Packet} = _Acc) ->
 	gen_server:cast(Proc, {offline_message_received,From, To, Packet}),
 	ok.
 
-process_offline_message({From, To, #message{body = [#text{data = Data}] = _Body} = _Packet}) ->
+get_room_title(From) ->
+	#jid {luser = RoomId, lserver = Server}  = From,
+	TupleList = mod_muc_admin:get_room_options(RoomId,Server),
+	case lists:keyfind(<<"title">>, 1, TupleList) of
+		{_, Title} ->
+			Title;
+		_ ->
+			<<"">>
+	end.
+
+is_muc(From) ->
+	#jid {lserver = Server}  = From,
+	Hosts = [ mod_muc_opt:host(X) || X <- ejabberd_option:hosts() ],
+	lists:member(Server, Hosts).
+
+process_offline_message({From, To, #message{body = [#text{data = Data}] = Body} = _Packet}) ->
 	?INFO_MSG("start to process offline message to ~p~n",[To]),
 	ToJID = jid:tolower(jid:remove_resource(To)),
 	case string:slice(Data, 0, 19) of
 		<<"aesgcm://w-4all.com">> ->
 			ok;
 		_ ->
-			send_notification(From, ToJID, Data, offline, missed)
+			case is_muc(From) of
+				true ->
+					FromResource = From#jid.lresource,
+					RoomTitle = get_room_title(From),
+					FromUser = <<FromResource/binary, <<" in group ">>, RoomTitle/binary>>,
+					send_notification(FromUser, ToJID, Data, offline, missed);
+				_ ->
+					case Body of
+						[] ->
+							ok;
+						_ ->
+							#jid{user = FromUser} = From,
+							send_notification(FromUser, ToJID, Data, offline, missed)
+					end
+			end
 	end;
 process_offline_message({From, To, #message{} = Pkt}) ->
 	case xmpp:try_subtag(Pkt, #push_notification{}) of
@@ -199,7 +228,8 @@ process_offline_message({From, To, #message{} = Pkt}) ->
 							?DEBUG("Status is not start, send offfline notification.~n",[]),
 							Type2 = binary_to_atom(string:lowercase(Type), unicode),
 							ToJID = jid:tolower(jid:remove_resource(To)),
-							send_notification(From, ToJID, <<>>, Type2, Status)
+							#jid{user = FromUser} = From,
+							send_notification(FromUser, ToJID, <<>>, Type2, Status)
 					end;
 				_ ->
 					ok
@@ -477,7 +507,7 @@ sm_receive_packet(#message{from = From, to = To} = Pkt) ->
 sm_receive_packet(Acc) ->
 	Acc.
 
-send_notification(FromJid, ToJid, Data, Type2, CallTypeStatus) ->
+send_notification(FromUser, ToJid, Data, Type2, CallTypeStatus) ->
 	case mnesia:dirty_read(aws_push_jid, ToJid) of
 		[Item] when is_record(Item, aws_push_jid) ->
 			#aws_push_jid{
@@ -487,7 +517,7 @@ send_notification(FromJid, ToJid, Data, Type2, CallTypeStatus) ->
 				arn=Arn} = Item,
 			case Status of
 				true ->
-					case publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) of
+					case publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) of
 						{ok, _} ->
 							?INFO_MSG("Notification sent.Jid:~p~n", [ToJid]),
 							ok;
@@ -506,9 +536,8 @@ send_notification(FromJid, ToJid, Data, Type2, CallTypeStatus) ->
 			ok
 	end.
 
-publish(PushKitArn, Arn, Type, FromJid, Data, Type2, CallTypeStatus) ->
+publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 
-	#jid{user = FromUser} = FromJid,
 	case Type of
 		fcm ->
 			Message = "You have a message from " ++ binary_to_list(FromUser),
