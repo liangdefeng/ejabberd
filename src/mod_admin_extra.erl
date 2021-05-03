@@ -5,7 +5,7 @@
 %%% Created : 10 Aug 2008 by Badlop <badlop@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -29,9 +29,10 @@
 -behaviour(gen_mod).
 
 -include("logger.hrl").
+-include("translate.hrl").
 
 -export([start/2, stop/1, reload/3, mod_options/1,
-	 get_commands_spec/0, depends/2]).
+	 get_commands_spec/0, depends/2, mod_doc/0]).
 
 % Commands API
 -export([
@@ -84,7 +85,7 @@
 -include("mod_roster.hrl").
 -include("mod_privacy.hrl").
 -include("ejabberd_sm.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 %%%
 %%% gen_mod
@@ -112,29 +113,29 @@ depends(_Host, _Opts) ->
 %%%
 
 get_commands_spec() ->
-    Vcard1FieldsString = "Some vcard field names in get/set_vcard are:\n"
-	" FN		- Full Name\n"
-	" NICKNAME	- Nickname\n"
-	" BDAY		- Birthday\n"
-	" TITLE		- Work: Position\n"
-	" ROLE		- Work: Role",
+    Vcard1FieldsString = "Some vcard field names in get/set_vcard are:\n\n"
+	"* FN           - Full Name\n"
+	"* NICKNAME     - Nickname\n"
+	"* BDAY         - Birthday\n"
+	"* TITLE        - Work: Position\n"
+	"* ROLE         - Work: Role\n",
 
-    Vcard2FieldsString = "Some vcard field names and subnames in get/set_vcard2 are:\n"
-	" N FAMILY	- Family name\n"
-	" N GIVEN	- Given name\n"
-	" N MIDDLE	- Middle name\n"
-	" ADR CTRY	- Address: Country\n"
-	" ADR LOCALITY	- Address: City\n"
-	" TEL HOME      - Telephone: Home\n"
-	" TEL CELL      - Telephone: Cellphone\n"
-	" TEL WORK      - Telephone: Work\n"
-	" TEL VOICE     - Telephone: Voice\n"
-	" EMAIL USERID	- E-Mail Address\n"
-	" ORG ORGNAME	- Work: Company\n"
-	" ORG ORGUNIT	- Work: Department",
+    Vcard2FieldsString = "Some vcard field names and subnames in get/set_vcard2 are:\n\n"
+	"* N FAMILY     - Family name\n"
+	"* N GIVEN      - Given name\n"
+	"* N MIDDLE     - Middle name\n"
+	"* ADR CTRY     - Address: Country\n"
+	"* ADR LOCALITY - Address: City\n"
+	"* TEL HOME     - Telephone: Home\n"
+	"* TEL CELL     - Telephone: Cellphone\n"
+	"* TEL WORK     - Telephone: Work\n"
+	"* TEL VOICE    - Telephone: Voice\n"
+	"* EMAIL USERID - E-Mail Address\n"
+	"* ORG ORGNAME  - Work: Company\n"
+	"* ORG ORGUNIT  - Work: Department\n",
 
     VcardXEP = "For a full list of vCard fields check XEP-0054: vcard-temp at "
-	"http://www.xmpp.org/extensions/xep-0054.html",
+	"https://xmpp.org/extensions/xep-0054.html",
 
     [
      #ejabberd_commands{name = compile, tags = [erlang],
@@ -274,7 +275,7 @@ get_commands_spec() ->
 			result = {res, rescode},
 			result_example = ok,
 			result_desc = "Status code: 0 on success, 1 otherwise"},
-     #ejabberd_commands{name = status_num_host, tags = [session, stats],
+     #ejabberd_commands{name = status_num_host, tags = [session, statistics],
 			desc = "Number of logged users with this status in host",
 			policy = admin,
 			module = ?MODULE, function = status_num,
@@ -284,7 +285,7 @@ get_commands_spec() ->
 			result = {users, integer},
 			result_example = 23,
 			result_desc = "Number of connected sessions with given status type"},
-     #ejabberd_commands{name = status_num, tags = [session, stats],
+     #ejabberd_commands{name = status_num, tags = [session, statistics],
 			desc = "Number of logged users with this status",
 			policy = admin,
 			module = ?MODULE, function = status_num,
@@ -399,7 +400,8 @@ get_commands_spec() ->
 			    "connected)\n\n'status' is a free text "
 			    "defined by the user client.",
 			module = ?MODULE, function = get_presence,
-			args = [{user, binary}, {server, binary}],
+			args = [{user, binary}, {host, binary}],
+			args_rename = [{server, host}],
 			args_example = [<<"peter">>, <<"myexample.com">>],
 			args_desc = ["User name", "Server name"],
 			result_example = {<<"user1@myserver.com/tka">>, <<"dnd">>, <<"Busy">>},
@@ -433,7 +435,7 @@ get_commands_spec() ->
 			result = {res, rescode}},
      #ejabberd_commands{name = get_vcard, tags = [vcard],
 			desc = "Get content from a vCard field",
-			longdesc = Vcard1FieldsString ++ "\n" ++ Vcard2FieldsString ++ "\n\n" ++ VcardXEP,
+			longdesc = Vcard1FieldsString ++ "\n" ++ VcardXEP,
 			module = ?MODULE, function = get_vcard,
 			args = [{user, binary}, {host, binary}, {name, binary}],
 			args_example = [<<"user1">>,<<"myserver.com">>,<<"NICKNAME">>],
@@ -443,7 +445,7 @@ get_commands_spec() ->
 			result = {content, string}},
      #ejabberd_commands{name = get_vcard2, tags = [vcard],
 			desc = "Get content from a vCard subfield",
-			longdesc = Vcard2FieldsString ++ "\n\n" ++ Vcard1FieldsString ++ "\n" ++ VcardXEP,
+			longdesc = Vcard2FieldsString ++ "\n" ++ VcardXEP,
 			module = ?MODULE, function = get_vcard,
 			args = [{user, binary}, {host, binary}, {name, binary}, {subname, binary}],
 			args_example = [<<"user1">>,<<"myserver.com">>,<<"N">>, <<"FAMILY">>],
@@ -453,14 +455,14 @@ get_commands_spec() ->
 			result = {content, string}},
      #ejabberd_commands{name = get_vcard2_multi, tags = [vcard],
 			desc = "Get multiple contents from a vCard field",
-			longdesc = Vcard2FieldsString ++ "\n\n" ++ Vcard1FieldsString ++ "\n" ++ VcardXEP,
+			longdesc = Vcard2FieldsString ++ "\n" ++ VcardXEP,
 			module = ?MODULE, function = get_vcard_multi,
 			args = [{user, binary}, {host, binary}, {name, binary}, {subname, binary}],
 			result = {contents, {list, {value, string}}}},
 
      #ejabberd_commands{name = set_vcard, tags = [vcard],
 			desc = "Set content in a vCard field",
-			longdesc = Vcard1FieldsString ++ "\n" ++ Vcard2FieldsString ++ "\n\n" ++ VcardXEP,
+			longdesc = Vcard1FieldsString ++ "\n" ++ VcardXEP,
 			module = ?MODULE, function = set_vcard,
 			args = [{user, binary}, {host, binary}, {name, binary}, {content, binary}],
 			args_example = [<<"user1">>,<<"myserver.com">>, <<"URL">>, <<"www.example.com">>],
@@ -468,7 +470,7 @@ get_commands_spec() ->
 			result = {res, rescode}},
      #ejabberd_commands{name = set_vcard2, tags = [vcard],
 			desc = "Set content in a vCard subfield",
-			longdesc = Vcard2FieldsString ++ "\n\n" ++ Vcard1FieldsString ++ "\n" ++ VcardXEP,
+			longdesc = Vcard2FieldsString ++ "\n" ++ VcardXEP,
 			module = ?MODULE, function = set_vcard,
 			args = [{user, binary}, {host, binary}, {name, binary}, {subname, binary}, {content, binary}],
 			args_example = [<<"user1">>,<<"myserver.com">>,<<"TEL">>, <<"NUMBER">>, <<"123456">>],
@@ -476,7 +478,7 @@ get_commands_spec() ->
 			result = {res, rescode}},
      #ejabberd_commands{name = set_vcard2_multi, tags = [vcard],
 			desc = "Set multiple contents in a vCard subfield",
-			longdesc = Vcard2FieldsString ++ "\n\n" ++ Vcard1FieldsString ++ "\n" ++ VcardXEP,
+			longdesc = Vcard2FieldsString ++ "\n" ++ VcardXEP,
 			module = ?MODULE, function = set_vcard,
 			args = [{user, binary}, {host, binary}, {name, binary}, {subname, binary}, {contents, {list, {value, binary}}}],
 			result = {res, rescode}},
@@ -485,10 +487,11 @@ get_commands_spec() ->
 			desc = "Add an item to a user's roster (supports ODBC)",
 			longdesc = "Group can be several groups separated by ; for example: \"g1;g2;g3\"",
 			module = ?MODULE, function = add_rosteritem,
-			args = [{localuser, binary}, {localserver, binary},
-				{user, binary}, {server, binary},
+			args = [{localuser, binary}, {localhost, binary},
+				{user, binary}, {host, binary},
 				{nick, binary}, {group, binary},
 				{subs, binary}],
+			args_rename = [{localserver, localhost}, {server, host}],
 			args_example = [<<"user1">>,<<"myserver.com">>,<<"user2">>, <<"myserver.com">>,
 				<<"User 2">>, <<"Friends">>, <<"both">>],
 			args_desc = ["User name", "Server name", "Contact user name", "Contact server name",
@@ -500,8 +503,9 @@ get_commands_spec() ->
      #ejabberd_commands{name = delete_rosteritem, tags = [roster],
 			desc = "Delete an item from a user's roster (supports ODBC)",
 			module = ?MODULE, function = delete_rosteritem,
-			args = [{localuser, binary}, {localserver, binary},
-				{user, binary}, {server, binary}],
+			args = [{localuser, binary}, {localhost, binary},
+				{user, binary}, {host, binary}],
+			args_rename = [{localserver, localhost}, {server, host}],
 			args_example = [<<"user1">>,<<"myserver.com">>,<<"user2">>, <<"myserver.com">>],
 			args_desc = ["User name", "Server name", "Contact user name", "Contact server name"],
 			result = {res, rescode}},
@@ -569,6 +573,7 @@ get_commands_spec() ->
                         policy = user,
 			module = ?MODULE, function = get_roster,
 			args = [],
+			args_rename = [{server, host}],
 			result = {contacts, {list, {contact, {tuple, [
 								      {jid, string},
 								      {nick, string},
@@ -644,7 +649,7 @@ get_commands_spec() ->
 			module = ?MODULE, function = private_set,
 			args = [{user, binary}, {host, binary}, {element, binary}],
 			args_example = [<<"user1">>,<<"myserver.com">>,
-                            <<"<query xmlns='jabber:iq:private'> <storage xmlns='storage:rosternotes'/></query>">>],
+                            <<"<storage xmlns='storage:rosternotes'/>">>],
 			args_desc = ["User name", "Server name", "XML storage element"],
 			result = {res, rescode}},
 
@@ -659,7 +664,8 @@ get_commands_spec() ->
 			"name desc \\\"group1\\\\ngroup2\\\"",
 			module = ?MODULE, function = srg_create,
 			args = [{group, binary}, {host, binary},
-				{name, binary}, {description, binary}, {display, binary}],
+				{label, binary}, {description, binary}, {display, binary}],
+			args_rename = [{name, label}],
 			args_example = [<<"group3">>, <<"myserver.com">>, <<"Group3">>,
 				<<"Third group">>, <<"group1\\\\ngroup2">>],
 			args_desc = ["Group identifier", "Group server name", "Group name",
@@ -720,21 +726,28 @@ get_commands_spec() ->
 			policy = user,
 			module = mod_offline, function = count_offline_messages,
 			args = [],
+			args_rename = [{server, host}],
 			result_example = 5,
 			result_desc = "Number",
 			result = {value, integer}},
      #ejabberd_commands{name = send_message, tags = [stanza],
 			desc = "Send a message to a local or remote bare of full JID",
+			longdesc = "When sending a groupchat message to a MUC room, "
+			"FROM must be the full JID of a room occupant, "
+			"or the bare JID of a MUC service admin, "
+			"or the bare JID of a MUC/Sub subscribed user.",
 			module = ?MODULE, function = send_message,
 			args = [{type, binary}, {from, binary}, {to, binary},
 				{subject, binary}, {body, binary}],
 			args_example = [<<"headline">>, <<"admin@localhost">>, <<"user1@localhost">>,
 				<<"Restart">>, <<"In 5 minutes">>],
-			args_desc = ["Message type: normal, chat, headline", "Sender JID",
+			args_desc = ["Message type: normal, chat, headline, groupchat", "Sender JID",
 				"Receiver JID", "Subject, or empty string", "Body"],
 			result = {res, rescode}},
      #ejabberd_commands{name = send_stanza_c2s, tags = [stanza],
-			desc = "Send a stanza as if sent from a c2s session",
+			desc = "Send a stanza from an existing C2S session",
+			longdesc = "USER@HOST/RESOURCE must be an existing C2S session."
+			" As an alternative, use send_stanza instead.",
 			module = ?MODULE, function = send_stanza_c2s,
 			args = [{user, binary}, {host, binary}, {resource, binary}, {stanza, binary}],
 			args_example = [<<"admin">>, <<"myserver.com">>, <<"bot">>,
@@ -758,7 +771,7 @@ get_commands_spec() ->
 			args_desc = ["Username", "Server name", "Query XML element"],
 			result = {res, rescode}},
 
-     #ejabberd_commands{name = stats, tags = [stats],
+     #ejabberd_commands{name = stats, tags = [statistics],
 			desc = "Get statistical value: registeredusers onlineusers onlineusersnode uptimeseconds processes",
 			policy = admin,
 			module = ?MODULE, function = stats,
@@ -768,7 +781,7 @@ get_commands_spec() ->
 			result_example = 6,
 			result_desc = "Integer statistic value",
 			result = {stat, integer}},
-     #ejabberd_commands{name = stats_host, tags = [stats],
+     #ejabberd_commands{name = stats_host, tags = [statistics],
 			desc = "Get statistical value for this host: registeredusers onlineusers",
 			policy = admin,
 			module = ?MODULE, function = stats,
@@ -844,7 +857,7 @@ check_password_hash(User, Host, PasswordHash, HashMethod) ->
 			  {A, _} when is_tuple(A) -> scrammed;
 			  {_, true} -> get_hash(AccountPass, HashMethod);
 			  {_, false} ->
-			      ?ERROR_MSG("check_password_hash called "
+			      ?ERROR_MSG("Check_password_hash called "
 					 "with hash method: ~p", [HashMethod]),
 			      undefined
 		      end,
@@ -1233,23 +1246,42 @@ update_vcard_els(Data, ContentList, Els1) ->
 %%%
 
 add_rosteritem(LocalUser, LocalServer, User, Server, Nick, Group, Subs) ->
-    Jid = jid:make(LocalUser, LocalServer),
-    RosterItem = build_roster_item(User, Server, {add, Nick, Subs, Group}),
-    case mod_roster:set_item_and_notify_clients(Jid, RosterItem, true) of
-	ok -> ok;
-	_ -> error
+    case {jid:make(LocalUser, LocalServer), jid:make(User, Server)} of
+	{error, _} ->
+	    throw({error, "Invalid 'localuser'/'localserver'"});
+	{_, error} ->
+	    throw({error, "Invalid 'user'/'server'"});
+	{Jid, _Jid2} ->
+	    RosterItem = build_roster_item(User, Server, {add, Nick, Subs, Group}),
+	    case mod_roster:set_item_and_notify_clients(Jid, RosterItem, true) of
+		ok -> ok;
+		_ -> error
+	    end
     end.
 
 subscribe(LU, LS, User, Server, Nick, Group, Subscription, _Xattrs) ->
-    ItemEl = build_roster_item(User, Server, {add, Nick, Subscription, Group}),
-    mod_roster:set_items(LU, LS, #roster_query{items = [ItemEl]}).
+    case {jid:make(LU, LS), jid:make(User, Server)} of
+	{error, _} ->
+	    throw({error, "Invalid 'localuser'/'localserver'"});
+	{_, error} ->
+	    throw({error, "Invalid 'user'/'server'"});
+	{_Jid, _Jid2} ->
+	    ItemEl = build_roster_item(User, Server, {add, Nick, Subscription, Group}),
+	    mod_roster:set_items(LU, LS, #roster_query{items = [ItemEl]})
+    end.
 
 delete_rosteritem(LocalUser, LocalServer, User, Server) ->
-    Jid = jid:make(LocalUser, LocalServer),
-    RosterItem = build_roster_item(User, Server, remove),
-    case mod_roster:set_item_and_notify_clients(Jid, RosterItem, true) of
-	ok -> ok;
-	_ -> error
+    case {jid:make(LocalUser, LocalServer), jid:make(User, Server)} of
+	{error, _} ->
+	    throw({error, "Invalid 'localuser'/'localserver'"});
+	{_, error} ->
+	    throw({error, "Invalid 'user'/'server'"});
+	{Jid, _Jid2} ->
+	    RosterItem = build_roster_item(User, Server, remove),
+	    case mod_roster:set_item_and_notify_clients(Jid, RosterItem, true) of
+		ok -> ok;
+		_ -> error
+	    end
     end.
 
 %% -----------------------------
@@ -1257,8 +1289,13 @@ delete_rosteritem(LocalUser, LocalServer, User, Server) ->
 %% -----------------------------
 
 get_roster(User, Server) ->
-    Items = ejabberd_hooks:run_fold(roster_get, Server, [], [{User, Server}]),
-    make_roster_xmlrpc(Items).
+    case jid:make(User, Server) of
+	error ->
+	    throw({error, "Invalid 'user'/'server'"});
+	#jid{luser = U, lserver = S} ->
+	    Items = ejabberd_hooks:run_fold(roster_get, S, [], [{U, S}]),
+	    make_roster_xmlrpc(Items)
+    end.
 
 %% Note: if a contact is in several groups, the contact is returned
 %% several times, each one in a different group.
@@ -1420,12 +1457,12 @@ private_set2(Username, Host, Xml) ->
 %%% Shared Roster Groups
 %%%
 
-srg_create(Group, Host, Name, Description, Display) ->
+srg_create(Group, Host, Label, Description, Display) ->
     DisplayList = case Display of
 	<<>> -> [];
 	_ -> ejabberd_regexp:split(Display, <<"\\\\n">>)
     end,
-    Opts = [{name, Name},
+    Opts = [{label, Label},
 	    {displayed_groups, DisplayList},
 	    {description, Description}],
     {atomic, _} = mod_shared_roster:create_group(Host, Group, Opts),
@@ -1468,53 +1505,79 @@ srg_user_del(User, Host, Group, GroupHost) ->
 %%% Stanza
 %%%
 
-%% @doc Send a message to a Jabber account.
+%% @doc Send a message to an XMPP account.
 %% @spec (Type::binary(), From::binary(), To::binary(), Subject::binary(), Body::binary()) -> ok
 send_message(Type, From, To, Subject, Body) ->
-    FromJID = jid:decode(From),
-    ToJID = jid:decode(To),
-    Packet = build_packet(Type, Subject, Body, FromJID, ToJID),
-    State1 = #{jid => FromJID},
-    ejabberd_hooks:run_fold(user_send_packet, FromJID#jid.lserver, {Packet, State1}, []),
-    ejabberd_router:route(xmpp:set_from_to(Packet, FromJID, ToJID)).
-
-build_packet(Type, Subject, Body, FromJID, ToJID) ->
-    #message{type = misc:binary_to_atom(Type),
-	     body = xmpp:mk_text(Body),
-	     from = FromJID,
-	     to = ToJID,
-	     id = p1_rand:get_string(),
-	     subject = xmpp:mk_text(Subject)}.
+    CodecOpts = ejabberd_config:codec_options(),
+    try xmpp:decode(
+          #xmlel{name = <<"message">>,
+                 attrs = [{<<"to">>, To},
+                          {<<"from">>, From},
+                          {<<"type">>, Type},
+                          {<<"id">>, p1_rand:get_string()}],
+                 children =
+                     [#xmlel{name = <<"subject">>,
+                             children = [{xmlcdata, Subject}]},
+                      #xmlel{name = <<"body">>,
+                             children = [{xmlcdata, Body}]}]},
+          ?NS_CLIENT, CodecOpts) of
+        #message{from = JID, subject = SubjectEl, body = BodyEl} = Msg ->
+            Msg2 = case {xmpp:get_text(SubjectEl), xmpp:get_text(BodyEl)} of
+                       {Subject, <<>>} -> Msg;
+                       {<<>>, Body} -> Msg#message{subject = []};
+                       _ -> Msg
+                   end,
+            State = #{jid => JID},
+            ejabberd_hooks:run_fold(user_send_packet, JID#jid.lserver, {Msg2, State}, []),
+            ejabberd_router:route(Msg2)
+    catch _:{xmpp_codec, Why} ->
+            {error, xmpp:format_error(Why)}
+    end.
 
 send_stanza(FromString, ToString, Stanza) ->
     try
 	#xmlel{} = El = fxml_stream:parse_element(Stanza),
 	From = jid:decode(FromString),
 	To = jid:decode(ToString),
-	CodecOpts = ejabberd_config:codec_options(From#jid.lserver),
+	CodecOpts = ejabberd_config:codec_options(),
 	Pkt = xmpp:decode(El, ?NS_CLIENT, CodecOpts),
-	ejabberd_router:route(xmpp:set_from_to(Pkt, From, To))
+        Pkt2 = xmpp:set_from_to(Pkt, From, To),
+        State = #{jid => From},
+        ejabberd_hooks:run_fold(user_send_packet, From#jid.lserver,
+                                {Pkt2, State}, []),
+        ejabberd_router:route(Pkt2)
     catch _:{xmpp_codec, Why} ->
-	    io:format("incorrect stanza: ~s~n", [xmpp:format_error(Why)]),
+	    io:format("incorrect stanza: ~ts~n", [xmpp:format_error(Why)]),
+	    {error, Why};
+	  _:{badmatch, {error, {Code, Why}}} when is_integer(Code) ->
+	    io:format("invalid xml: ~p~n", [Why]),
 	    {error, Why};
 	  _:{badmatch, {error, Why}} ->
 	    io:format("invalid xml: ~p~n", [Why]),
 	    {error, Why};
 	  _:{bad_jid, S} ->
-	    io:format("malformed JID: ~s~n", [S]),
+	    io:format("malformed JID: ~ts~n", [S]),
 	    {error, "JID malformed"}
     end.
 
+-spec send_stanza_c2s(binary(), binary(), binary(), binary()) -> ok | {error, any()}.
 send_stanza_c2s(Username, Host, Resource, Stanza) ->
-    case {fxml_stream:parse_element(Stanza),
-          ejabberd_sm:get_session_pid(Username, Host, Resource)}
-    of
-	{{error, Error}, _} ->
-	    {error, Error};
-	{_, none} ->
-	    {error, no_session};
-	{XmlEl, C2sPid} ->
-	    p1_fsm:send_event(C2sPid, {xmlstreamelement, XmlEl})
+    try
+	#xmlel{} = El = fxml_stream:parse_element(Stanza),
+	CodecOpts = ejabberd_config:codec_options(),
+	Pkt = xmpp:decode(El, ?NS_CLIENT, CodecOpts),
+	case ejabberd_sm:get_session_pid(Username, Host, Resource) of
+	    Pid when is_pid(Pid) ->
+		ejabberd_c2s:send(Pid, Pkt);
+	    _ ->
+		{error, no_session}
+	end
+    catch _:{badmatch, {error, Why} = Err} ->
+	    io:format("invalid xml: ~p~n", [Why]),
+	    Err;
+	  _:{xmpp_codec, Why} ->
+	    io:format("incorrect stanza: ~ts~n", [xmpp:format_error(Why)]),
+	    {error, Why}
     end.
 
 privacy_set(Username, Host, QueryS) ->
@@ -1534,7 +1597,7 @@ stats(Name) ->
     case Name of
 	<<"uptimeseconds">> -> trunc(element(1, erlang:statistics(wall_clock))/1000);
 	<<"processes">> -> length(erlang:processes());
-	<<"registeredusers">> -> lists:foldl(fun(Host, Sum) -> ejabberd_auth:count_users(Host) + Sum end, 0, ejabberd_config:get_myhosts());
+	<<"registeredusers">> -> lists:foldl(fun(Host, Sum) -> ejabberd_auth:count_users(Host) + Sum end, 0, ejabberd_option:hosts());
 	<<"onlineusersnode">> -> length(ejabberd_sm:dirty_get_my_sessions_list());
 	<<"onlineusers">> -> length(ejabberd_sm:dirty_get_sessions_list())
     end.
@@ -1566,3 +1629,58 @@ num_prio(_) ->
     -1.
 
 mod_options(_) -> [].
+
+mod_doc() ->
+    #{desc =>
+          [?T("This module provides additional administrative commands."), "",
+           ?T("Details for some commands:"), "",
+           ?T("- 'ban-acount':"),
+           ?T("This command kicks all the connected sessions of the account "
+	      "from the server. It also changes their password to a randomly "
+	      "generated one, so they can't login anymore unless a server "
+	      "administrator changes their password again. It is possible to "
+	      "define the reason of the ban. The new password also includes "
+	      "the reason and the date and time of the ban. See an example below."),
+           ?T("- 'pushroster': (and 'pushroster-all')"),
+           ?T("The roster file must be placed, if using Windows, on the "
+	      "directory where you installed ejabberd: "
+	      "C:/Program Files/ejabberd or similar. If you use other "
+	      "Operating System, place the file on the same directory where "
+	      "the .beam files are installed. See below an example roster file."),
+           ?T("- 'srg-create':"),
+           ?T("If you want to put a group Name with blankspaces, use the "
+	      "characters \"\' and \'\" to define when the Name starts and "
+	      "ends. See an example below.")],
+      opts =>
+          [{module_resource,
+            #{value => ?T("Resource"),
+              desc =>
+                  ?T("Indicate the resource that the XMPP stanzas must use "
+		     "in the FROM or TO JIDs. This is only useful in the "
+		     "'get_vcard*' and 'set_vcard*' commands. The default "
+		     "value is 'mod_admin_extra'.")}}],
+      example =>
+	  [{?T("With this configuration, vCards can only be modified with "
+	       "mod_admin_extra commands:"),
+	    ["acl:",
+	     "  adminextraresource:",
+	     "    - resource: \"modadminextraf8x,31ad\"",
+	     "access_rules:",
+	     "  vcard_set:",
+	     "    - allow: adminextraresource",
+	     "modules:",
+	     "  mod_admin_extra:",
+	     "    module_resource: \"modadminextraf8x,31ad\"",
+	     "  mod_vcard:",
+	     "    access_set: vcard_set"]},
+	   {?T("Content of roster file for 'pushroster' command:"),
+	    ["[{<<\"bob\">>, <<\"example.org\">>, <<\"workers\">>, <<\"Bob\">>},",
+	     "{<<\"mart\">>, <<\"example.org\">>, <<\"workers\">>, <<\"Mart\">>},",
+	     "{<<\"Rich\">>, <<\"example.org\">>, <<\"bosses\">>, <<\"Rich\">>}]."]},
+	   {?T("With this call, the sessions of the local account which JID is "
+	      "boby@example.org will be kicked, and its password will be set "
+	      "to something like "
+	      "'BANNED_ACCOUNT--20080425T21:45:07--2176635--Spammed_rooms'"),
+	    ["ejabberdctl vhost example.org ban-account boby \"Spammed rooms\""]},
+	   {?T("Call to srg-create using double-quotes and single-quotes:"),
+	    ["ejabberdctl srg-create g1 example.org \"\'Group number 1\'\" this_is_g1 g1"]}]}.

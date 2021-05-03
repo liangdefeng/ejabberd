@@ -3,7 +3,7 @@
 %%% Created : 14 Nov 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -368,7 +368,6 @@ mucsub_slave(Config) ->
 	end, lists:seq(1, 5)),
     RSM = ?match(#iq{from = MyJIDBare, id = I, type = result,
 		     sub_els = [#mam_fin{xmlns = ?NS_MAM_2,
-					 id = QID,
 					 rsm = RSM,
 					 complete = true}]}, recv_iq(Config), RSM),
     match_rsm_count(RSM, 5),
@@ -387,9 +386,9 @@ mucsub_from_muc_master(Config) ->
 
 mucsub_from_muc_slave(Config) ->
     Server = ?config(server, Config),
-    gen_mod:update_module_opts(Server, mod_mam, [{user_mucsub_from_muc_archive, true}]),
+    gen_mod:update_module(Server, mod_mam, #{user_mucsub_from_muc_archive => true}),
     Config2 = mucsub_slave(Config),
-    gen_mod:update_module_opts(Server, mod_mam, [{user_mucsub_from_muc_archive, false}]),
+    gen_mod:update_module(Server, mod_mam, #{user_mucsub_from_muc_archive => false}),
     Config2.
 
 mucsub_from_muc_non_persistent_master(Config) ->
@@ -488,7 +487,6 @@ recv_fin(Config, I, QueryID, NS, IsComplete) when NS == ?NS_MAM_1; NS == ?NS_MAM
     ct:comment("Receiving fin iq for namespace '~s'", [NS]),
     #iq{type = result, id = I,
 	sub_els = [#mam_fin{xmlns = NS,
-			    id = QueryID,
 			    complete = Complete,
 			    rsm = RSM}]} = recv_iq(Config),
     ct:comment("Checking if complete is ~s", [IsComplete]),
@@ -553,7 +551,6 @@ recv_messages_from_room(Config, Range) ->
       end, Range),
     #iq{from = Room, id = I, type = result,
 	sub_els = [#mam_fin{xmlns = ?NS_MAM_2,
-			    id = QID,
 			    rsm = RSM,
 			    complete = true}]} = recv_iq(Config),
     match_rsm_count(RSM, length(Range)).

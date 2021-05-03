@@ -5,7 +5,7 @@
 %%% Created : 15 Jul 2017 by Holger Weiss <holger@zedat.fu-berlin.de>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2017-2019 ProcessOne
+%%% ejabberd, Copyright (C) 2017-2021 ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,7 @@
 
 %% gen_mod callbacks.
 -export([start/2, stop/1, reload/3, mod_opt_type/1, mod_options/1, depends/2]).
-
+-export([mod_doc/0]).
 %% ejabberd_hooks callbacks.
 -export([disco_sm_features/5, c2s_session_pending/1, c2s_copy_session/2,
 	 c2s_handle_cast/2, c2s_stanza/3, mam_message/7, offline_message/1,
@@ -51,7 +51,8 @@
 
 -include("ejabberd_commands.hrl").
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+-include("translate.hrl").
 
 -define(PUSH_CACHE, push_cache).
 
@@ -92,7 +93,7 @@
 %%--------------------------------------------------------------------
 -spec start(binary(), gen_mod:opts()) -> ok.
 start(Host, Opts) ->
-    Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
+    Mod = gen_mod:db_mod(Opts, ?MODULE),
     Mod:init(Host, Opts),
     init_cache(Mod, Host, Opts),
     register_iq_handlers(Host),
@@ -112,43 +113,101 @@ stop(Host) ->
 
 -spec reload(binary(), gen_mod:opts(), gen_mod:opts()) -> ok.
 reload(Host, NewOpts, OldOpts) ->
-    NewMod = gen_mod:db_mod(Host, NewOpts, ?MODULE),
-    OldMod = gen_mod:db_mod(Host, OldOpts, ?MODULE),
+    NewMod = gen_mod:db_mod(NewOpts, ?MODULE),
+    OldMod = gen_mod:db_mod(OldOpts, ?MODULE),
     if NewMod /= OldMod ->
 	    NewMod:init(Host, NewOpts);
        true ->
 	    ok
-    end.
+    end,
+    init_cache(NewMod, Host, NewOpts),
+    ok.
 
 -spec depends(binary(), gen_mod:opts()) -> [{module(), hard | soft}].
 depends(_Host, _Opts) ->
     [].
 
--spec mod_opt_type(atom()) -> fun((term()) -> term()) | [atom()].
+-spec mod_opt_type(atom()) -> econf:validator().
 mod_opt_type(include_sender) ->
-    fun (B) when is_boolean(B) -> B end;
+    econf:bool();
 mod_opt_type(include_body) ->
-    fun (B) when is_boolean(B) -> B;
-        (S) -> iolist_to_binary(S)
-    end;
+    econf:either(
+      econf:bool(),
+      econf:binary());
 mod_opt_type(db_type) ->
-    fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun(I) when is_integer(I), I > 0 -> I;
-       (infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
+    econf:db_type(?MODULE);
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
 -spec mod_options(binary()) -> [{atom(), any()}].
 mod_options(Host) ->
     [{include_sender, false},
      {include_body, <<"New message">>},
      {db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+     {use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
+
+mod_doc() ->
+    #{desc =>
+          ?T("This module implements the XMPP server's part of "
+             "the push notification solution specified in "
+             "https://xmpp.org/extensions/xep-0357.html"
+             "[XEP-0357: Push Notifications]. It does not generate, "
+             "for example, APNS or FCM notifications directly. "
+             "Instead, it's designed to work with so-called "
+             "\"app servers\" operated by third-party vendors of "
+             "mobile apps. Those app servers will usually trigger "
+             "notification delivery to the user's mobile device using "
+             "platform-dependant backend services such as FCM or APNS."),
+      opts =>
+          [{include_sender,
+            #{value => "true | false",
+              desc =>
+                  ?T("If this option is set to 'true', the sender's JID "
+                     "is included with push notifications generated for "
+                     "incoming messages with a body. "
+                     "The default value is 'false'.")}},
+           {include_body,
+            #{value => "true | false | Text",
+              desc =>
+                  ?T("If this option is set to 'true', the message text "
+                     "is included with push notifications generated for "
+                     "incoming messages with a body. The option can instead "
+                     "be set to a static 'Text', in which case the specified "
+                     "text will be included in place of the actual message "
+                     "body. This can be useful to signal the app server "
+                     "whether the notification was triggered by a message "
+                     "with body (as opposed to other types of traffic) "
+                     "without leaking actual message contents. "
+                     "The default value is \"New message\".")}},
+           {db_type,
+            #{value => "mnesia | sql",
+              desc =>
+                  ?T("Same as top-level 'default_db' option, but applied to this module only.")}},
+           {use_cache,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level 'use_cache' option, but applied to this module only.")}},
+           {cache_size,
+            #{value => "pos_integer() | infinity",
+              desc =>
+                  ?T("Same as top-level 'cache_size' option, but applied to this module only.")}},
+           {cache_missed,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level 'cache_missed' option, but applied to this module only.")}},
+           {cache_life_time,
+            #{value => "timeout()",
+              desc =>
+                  ?T("Same as top-level 'cache_life_time' option, but applied to this module only.")}}]}.
 
 %%--------------------------------------------------------------------
 %% ejabberd command callback.
@@ -169,11 +228,11 @@ delete_old_sessions(Days) ->
     DBTypes = lists:usort(
 		lists:map(
 		  fun(Host) ->
-			  case gen_mod:get_module_opt(Host, ?MODULE, db_type) of
+			  case mod_push_opt:db_type(Host) of
 			      sql -> {sql, Host};
 			      Other -> {Other, global}
 			  end
-		  end, ejabberd_config:get_myhosts())),
+		  end, ejabberd_option:hosts())),
     Results = lists:map(
 		fun({DBType, Host}) ->
 			Mod = gen_mod:db_mod(DBType, ?MODULE),
@@ -184,9 +243,9 @@ delete_old_sessions(Days) ->
 	[] ->
 	    ?INFO_MSG("Deleted push sessions older than ~B days", [Days]),
 	    ok;
-	[NotOk | _] ->
-	    ?ERROR_MSG("Error while deleting old push sessions: ~p", [NotOk]),
-	    NotOk
+	[{error, Reason} | _] ->
+	    ?ERROR_MSG("Error while deleting old push sessions: ~p", [Reason]),
+	    Reason
     end.
 
 %%--------------------------------------------------------------------
@@ -206,8 +265,8 @@ register_hooks(Host) ->
 		       c2s_stanza, 50),
     ejabberd_hooks:add(store_mam_message, Host, ?MODULE,
 		       mam_message, 50),
-    ejabberd_hooks:add(store_offline_message, Host, ?MODULE,
-		       offline_message, 50),
+    ejabberd_hooks:add(offline_message_hook, Host, ?MODULE,
+		       offline_message, 55),
     ejabberd_hooks:add(remove_user, Host, ?MODULE,
 		       remove_user, 50).
 
@@ -225,8 +284,8 @@ unregister_hooks(Host) ->
 			  c2s_stanza, 50),
     ejabberd_hooks:delete(store_mam_message, Host, ?MODULE,
 			  mam_message, 50),
-    ejabberd_hooks:delete(store_offline_message, Host, ?MODULE,
-			  offline_message, 50),
+    ejabberd_hooks:delete(offline_message_hook, Host, ?MODULE,
+			  offline_message, 55),
     ejabberd_hooks:delete(remove_user, Host, ?MODULE,
 			  remove_user, 50).
 
@@ -259,10 +318,10 @@ unregister_iq_handlers(Host) ->
 
 -spec process_iq(iq()) -> iq().
 process_iq(#iq{type = get, lang = Lang} = IQ) ->
-    Txt = <<"Value 'get' of 'type' attribute is not allowed">>,
+    Txt = ?T("Value 'get' of 'type' attribute is not allowed"),
     xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
 process_iq(#iq{lang = Lang, sub_els = [#push_enable{node = <<>>}]} = IQ) ->
-    Txt = <<"Enabling push without 'node' attribute is not supported">>,
+    Txt = ?T("Enabling push without 'node' attribute is not supported"),
     xmpp:make_error(IQ, xmpp:err_feature_not_implemented(Txt, Lang));
 process_iq(#iq{from = #jid{lserver = LServer} = JID,
 	       to = #jid{lserver = LServer},
@@ -274,10 +333,10 @@ process_iq(#iq{from = #jid{lserver = LServer} = JID,
 	ok ->
 	    xmpp:make_iq_result(IQ);
 	{error, db_failure} ->
-	    Txt = <<"Database failure">>,
+	    Txt = ?T("Database failure"),
 	    xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang));
 	{error, notfound} ->
-	    Txt = <<"User session not found">>,
+	    Txt = ?T("User session not found"),
 	    xmpp:make_error(IQ, xmpp:err_item_not_found(Txt, Lang))
     end;
 process_iq(#iq{from = #jid{lserver = LServer} = JID,
@@ -289,10 +348,10 @@ process_iq(#iq{from = #jid{lserver = LServer} = JID,
 	ok ->
 	    xmpp:make_iq_result(IQ);
 	{error, db_failure} ->
-	    Txt = <<"Database failure">>,
+	    Txt = ?T("Database failure"),
 	    xmpp:make_error(IQ, xmpp:err_internal_server_error(Txt, Lang));
 	{error, notfound} ->
-	    Txt = <<"Push record not found">>,
+	    Txt = ?T("Push record not found"),
 	    xmpp:make_error(IQ, xmpp:err_item_not_found(Txt, Lang))
     end;
 process_iq(IQ) ->
@@ -305,16 +364,16 @@ enable(#jid{luser = LUser, lserver = LServer, lresource = LResource} = JID,
 	{TS, PID} ->
 	    case store_session(LUser, LServer, TS, PushJID, Node, XData) of
 		{ok, _} ->
-		    ?INFO_MSG("Enabling push notifications for ~s",
+		    ?INFO_MSG("Enabling push notifications for ~ts",
 			      [jid:encode(JID)]),
 		    ejabberd_c2s:cast(PID, push_enable);
 		{error, _} = Err ->
-		    ?ERROR_MSG("Cannot enable push for ~s: database error",
+		    ?ERROR_MSG("Cannot enable push for ~ts: database error",
 			       [jid:encode(JID)]),
 		    Err
 	    end;
 	none ->
-	    ?WARNING_MSG("Cannot enable push for ~s: session not found",
+	    ?WARNING_MSG("Cannot enable push for ~ts: session not found",
 			 [jid:encode(JID)]),
 	    {error, notfound}
     end.
@@ -324,11 +383,11 @@ disable(#jid{luser = LUser, lserver = LServer, lresource = LResource} = JID,
        PushJID, Node) ->
     case ejabberd_sm:get_session_sid(LUser, LServer, LResource) of
 	{_TS, PID} ->
-	    ?INFO_MSG("Disabling push notifications for ~s",
+	    ?INFO_MSG("Disabling push notifications for ~ts",
 		      [jid:encode(JID)]),
 	    ejabberd_c2s:cast(PID, push_disable);
 	none ->
-	    ?WARNING_MSG("Session not found while disabling push for ~s",
+	    ?WARNING_MSG("Session not found while disabling push for ~ts",
 			 [jid:encode(JID)])
     end,
     if Node /= <<>> ->
@@ -346,7 +405,7 @@ c2s_stanza(State, #stream_error{}, _SendResult) ->
 c2s_stanza(#{push_enabled := true, mgmt_state := pending} = State,
 	   Pkt, _SendResult) ->
     ?DEBUG("Notifying client of stanza", []),
-    notify(State, unwrap_carbon(Pkt), get_direction(Pkt)),
+    notify(State, unwrap_message(Pkt), get_direction(Pkt)),
     State;
 c2s_stanza(State, _Pkt, _SendResult) ->
     State.
@@ -358,7 +417,7 @@ mam_message(#message{} = Pkt, LUser, LServer, _Peer, _Nick, chat, Dir) ->
 	{ok, [_|_] = Clients} ->
 	    case drop_online_sessions(LUser, LServer, Clients) of
 		[_|_] = Clients1 ->
-		    ?DEBUG("Notifying ~s@~s of MAM message", [LUser, LServer]),
+		    ?DEBUG("Notifying ~ts@~ts of MAM message", [LUser, LServer]),
 		    notify(LUser, LServer, Clients1, Pkt, Dir);
 		[] ->
 		    ok
@@ -370,18 +429,22 @@ mam_message(#message{} = Pkt, LUser, LServer, _Peer, _Nick, chat, Dir) ->
 mam_message(Pkt, _LUser, _LServer, _Peer, _Nick, _Type, _Dir) ->
     Pkt.
 
--spec offline_message(message()) -> message().
-offline_message(#message{meta = #{mam_archived := true}} = Pkt) ->
-    Pkt; % Push notification was triggered via MAM.
-offline_message(#message{to = #jid{luser = LUser, lserver = LServer}} = Pkt) ->
+-spec offline_message({any(), message()}) -> {any(), message()}.
+offline_message({offlined, #message{meta = #{mam_archived := true}}} = Acc) ->
+    Acc; % Push notification was triggered via MAM.
+offline_message({offlined,
+		 #message{to = #jid{luser = LUser,
+				    lserver = LServer}} = Pkt} = Acc) ->
     case lookup_sessions(LUser, LServer) of
 	{ok, [_|_] = Clients} ->
-	    ?DEBUG("Notifying ~s@~s of offline message", [LUser, LServer]),
+	    ?DEBUG("Notifying ~ts@~ts of offline message", [LUser, LServer]),
 	    notify(LUser, LServer, Clients, Pkt, recv);
 	_ ->
 	    ok
     end,
-    Pkt.
+    Acc;
+offline_message(Acc) ->
+    Acc.
 
 -spec c2s_session_pending(c2s_state()) -> c2s_state().
 c2s_session_pending(#{push_enabled := true, mgmt_queue := Queue} = State) ->
@@ -391,7 +454,7 @@ c2s_session_pending(#{push_enabled := true, mgmt_queue := Queue} = State) ->
 	    {Pkt, Dir} = case mod_stream_mgmt:queue_find(
 				fun is_incoming_chat_msg/1, Queue) of
 			     none -> {none, undefined};
-			     Pkt0 -> {unwrap_carbon(Pkt0), get_direction(Pkt0)}
+			     Pkt0 -> {unwrap_message(Pkt0), get_direction(Pkt0)}
 			 end,
 	    notify(State, Pkt, Dir),
 	    State;
@@ -417,7 +480,7 @@ c2s_handle_cast(State, _Msg) ->
 
 -spec remove_user(binary(), binary()) -> ok | {error, err_reason()}.
 remove_user(LUser, LServer) ->
-    ?INFO_MSG("Removing any push sessions of ~s@~s", [LUser, LServer]),
+    ?INFO_MSG("Removing any push sessions of ~ts@~ts", [LUser, LServer]),
     Mod = gen_mod:db_mod(LServer, ?MODULE),
     LookupFun = fun() -> Mod:lookup_sessions(LUser, LServer) end,
     delete_sessions(LUser, LServer, LookupFun, Mod).
@@ -443,27 +506,27 @@ notify(LUser, LServer, Clients, Pkt, Dir) ->
       fun({TS, PushLJID, Node, XData}) ->
 	      HandleResponse =
 	          fun(#iq{type = result}) ->
-			  ?DEBUG("~s accepted notification for ~s@~s (~s)",
+			  ?DEBUG("~ts accepted notification for ~ts@~ts (~ts)",
 				 [jid:encode(PushLJID), LUser, LServer, Node]);
 		     (#iq{type = error} = IQ) ->
 			  case inspect_error(IQ) of
 			      {wait, Reason} ->
-				  ?INFO_MSG("~s rejected notification for "
-					    "~s@~s (~s) temporarily: ~s",
+				  ?INFO_MSG("~ts rejected notification for "
+					    "~ts@~ts (~ts) temporarily: ~ts",
 					    [jid:encode(PushLJID), LUser,
 					     LServer, Node, Reason]);
 			      {Type, Reason} ->
 				  spawn(?MODULE, delete_session,
 					[LUser, LServer, TS]),
-				  ?WARNING_MSG("~s rejected notification for "
-					       "~s@~s (~s), disabling push: ~s "
-					       "(~s)",
+				  ?WARNING_MSG("~ts rejected notification for "
+					       "~ts@~ts (~ts), disabling push: ~ts "
+					       "(~ts)",
 					       [jid:encode(PushLJID), LUser,
 						LServer, Node, Reason, Type])
 			  end;
 		     (timeout) ->
-			  ?DEBUG("Timeout sending notification for ~s@~s (~s) "
-				 "to ~s",
+			  ?DEBUG("Timeout sending notification for ~ts@~ts (~ts) "
+				 "to ~ts",
 				 [LUser, LServer, Node, jid:encode(PushLJID)]),
 			  ok % Hmm.
 		  end,
@@ -492,7 +555,7 @@ notify(LServer, PushLJID, Node, XData, Pkt, Dir, HandleResponse) ->
 -spec is_incoming_chat_msg(stanza()) -> boolean().
 is_incoming_chat_msg(#message{} = Msg) ->
     case get_direction(Msg) of
-	recv -> get_body_text(unwrap_carbon(Msg)) /= none;
+	recv -> get_body_text(unwrap_message(Msg)) /= none;
 	send -> false
     end;
 is_incoming_chat_msg(_Stanza) ->
@@ -622,8 +685,8 @@ drop_online_sessions(LUser, LServer, Clients) ->
 -spec make_summary(binary(), xmpp_element() | xmlel() | none, direction())
       -> xdata() | undefined.
 make_summary(Host, #message{from = From} = Pkt, recv) ->
-    case {gen_mod:get_module_opt(Host, ?MODULE, include_sender),
-	  gen_mod:get_module_opt(Host, ?MODULE, include_body)} of
+    case {mod_push_opt:include_sender(Host),
+	  mod_push_opt:include_body(Host)} of
 	{false, false} ->
 	    undefined;
 	{IncludeSender, IncludeBody} ->
@@ -651,10 +714,17 @@ make_summary(Host, #message{from = From} = Pkt, recv) ->
 make_summary(_Host, _Pkt, _Dir) ->
     undefined.
 
--spec unwrap_carbon(stanza()) -> stanza().
-unwrap_carbon(#message{meta = #{carbon_copy := true}} = Msg) ->
+-spec unwrap_message(stanza()) -> stanza().
+unwrap_message(#message{meta = #{carbon_copy := true}} = Msg) ->
     misc:unwrap_carbon(Msg);
-unwrap_carbon(Stanza) ->
+unwrap_message(#message{type = normal} = Msg) ->
+    case misc:unwrap_mucsub_message(Msg) of
+	#message{} = InnerMsg ->
+	    InnerMsg;
+	false ->
+	    Msg
+    end;
+unwrap_message(Stanza) ->
     Stanza.
 
 -spec get_direction(stanza()) -> direction().
@@ -714,19 +784,16 @@ init_cache(Mod, Host, Opts) ->
 
 -spec cache_opts(gen_mod:opts()) -> [proplists:property()].
 cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_push_opt:cache_size(Opts),
+    CacheMissed = mod_push_opt:cache_missed(Opts),
+    LifeTime = mod_push_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
 -spec use_cache(module(), binary()) -> boolean().
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false -> mod_push_opt:use_cache(Host)
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].

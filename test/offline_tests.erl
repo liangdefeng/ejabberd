@@ -3,7 +3,7 @@
 %%% Created :  7 Nov 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -77,11 +77,11 @@ send_non_existent(Config) ->
     disconnect(Config).
 
 view_non_existent(Config) ->
-    #stanza_error{reason = 'item-not-found'} = view(Config, [p1_rand:get_string()], false),
+    #stanza_error{reason = 'item-not-found'} = view(Config, [rand_string()], false),
     disconnect(Config).
 
 remove_non_existent(Config) ->
-    ok = remove(Config, [p1_rand:get_string()]),
+    ok = remove(Config, [rand_string()]),
     disconnect(Config).
 
 view_non_integer(Config) ->
@@ -93,7 +93,7 @@ remove_non_integer(Config) ->
     disconnect(Config).
 
 malformed_iq(Config) ->
-    Item = #offline_item{node = p1_rand:get_string()},
+    Item = #offline_item{node = rand_string()},
     Range = [{Type, SubEl} || Type <- [set, get],
 			      SubEl <- [#offline{items = [], _ = false},
 					#offline{items = [Item], _ = true}]]
@@ -112,7 +112,7 @@ malformed_iq(Config) ->
 wrong_user(Config) ->
     Server = ?config(server, Config),
     To = jid:make(<<"foo">>, Server),
-    Item = #offline_item{node = p1_rand:get_string()},
+    Item = #offline_item{node = rand_string()},
     Range = [{Type, Items, Purge, Fetch} ||
 		Type <- [set, get],
 		Items <- [[], [Item]],
@@ -130,7 +130,7 @@ wrong_user(Config) ->
     disconnect(Config).
 
 unsupported_iq(Config) ->
-    Item = #offline_item{node = p1_rand:get_string()},
+    Item = #offline_item{node = rand_string()},
     lists:foreach(
       fun(Type) ->
 	      #iq{type = error} = Err =
@@ -145,14 +145,9 @@ unsupported_iq(Config) ->
 master_slave_cases(DB) ->
     {offline_master_slave, [sequence],
      [master_slave_test(flex),
-      master_slave_test(send_all)] ++
-	case DB of
-	    riak -> [];
-	    _ -> [
-		master_slave_test(from_mam),
-		master_slave_test(mucsub_mam)]
-	end
-      }.
+      master_slave_test(send_all),
+      master_slave_test(from_mam),
+      master_slave_test(mucsub_mam)]}.
 
 flex_master(Config) ->
     send_messages(Config, 5),
@@ -189,11 +184,11 @@ from_mam_master(Config) ->
 
 from_mam_slave(Config) ->
     Server = ?config(server, Config),
-    gen_mod:update_module_opts(Server, mod_offline, [{use_mam_for_storage, true}]),
+    gen_mod:update_module(Server, mod_offline, #{use_mam_for_storage => true}),
     ok = mam_tests:set_default(Config, always),
     C2 = lists:keystore(mam_enabled, 1, Config, {mam_enabled, true}),
     C3 = send_all_slave(C2),
-    gen_mod:update_module_opts(Server, mod_offline, [{use_mam_for_storage, false}]),
+    gen_mod:update_module(Server, mod_offline, #{use_mam_for_storage => false}),
     C4 = lists:keydelete(mam_enabled, 1, C3),
     mam_tests:clean(C4).
 
@@ -234,8 +229,8 @@ mucsub_mam_master(Config) ->
 
 mucsub_mam_slave(Config) ->
     Server = ?config(server, Config),
-    gen_mod:update_module_opts(Server, mod_offline, [{use_mam_for_storage, true}]),
-    gen_mod:update_module_opts(Server, mod_mam, [{user_mucsub_from_muc_archive, true}]),
+    gen_mod:update_module(Server, mod_offline, #{use_mam_for_storage => true}),
+    gen_mod:update_module(Server, mod_mam, #{user_mucsub_from_muc_archive => true}),
 
     Room = suite:muc_room_jid(Config),
     MyJID = my_jid(Config),
@@ -268,8 +263,8 @@ mucsub_mam_slave(Config) ->
     ]}, #iq{type = result}),
     suite:put_event(Config, ready),
     mam_tests:clean(clean(disconnect(Config))),
-    gen_mod:update_module_opts(Server, mod_offline, [{use_mam_for_storage, false}]),
-    gen_mod:update_module_opts(Server, mod_mam, [{user_mucsub_from_muc_archive, false}]).
+    gen_mod:update_module(Server, mod_offline, #{use_mam_for_storage => false}),
+    gen_mod:update_module(Server, mod_mam, #{user_mucsub_from_muc_archive => false}).
 
 send_all_master(Config) ->
     wait_for_slave(Config),
@@ -500,7 +495,7 @@ message_iterator(Config) ->
     Offline = [[#offline{}]],
     Hints = [[#hint{type = T}] || T <- [store, 'no-store']],
     XEvent = [[#xevent{id = ID, offline = OfflineFlag}]
-	      || ID <- [undefined, p1_rand:get_string()],
+	      || ID <- [undefined, rand_string()],
 		 OfflineFlag <- [false, true]],
     Delay = [[#delay{stamp = p1_time_compat:timestamp(), from = ServerJID}]],
     AllEls = [Els1 ++ Els2 || Els1 <- [[]] ++ ChatStates ++ Delay ++ Hints ++ Offline,
@@ -525,3 +520,6 @@ message_iterator(Config) ->
 	 (#message{type = Type}) -> (Type == chat) or (Type == normal);
 	 (_) -> false
       end, All).
+
+rand_string() ->
+    integer_to_binary(p1_rand:uniform((1 bsl 31)-1)).

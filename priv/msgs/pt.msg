@@ -1,10 +1,10 @@
-%% -*- coding: latin-1 -*-
+%% Generated automatically
+%% DO NOT EDIT: run `make translations` instead
+%% To improve translations please read:
+%%   https://docs.ejabberd.im/developer/extending-ejabberd/localization/
+
 {" has set the subject to: "," colocou o tópico: "}.
-{"Access Configuration","Configuração de acessos"}.
-{"Access Control List Configuration","Configuração da Lista de Controlo de Acesso"}.
-{"Access Control Lists","Listas de Controlo de Acesso"}.
 {"Access denied by service policy","Acesso negado pela política de serviço"}.
-{"Access Rules","Regras de Acesso"}.
 {"Action on user","Acção no utilizador"}.
 {"Add New","Adicionar novo"}.
 {"Add User","Adicionar utilizador"}.
@@ -17,7 +17,6 @@
 {"Birthday","Data de nascimento"}.
 {"Change Password","Mudar palavra-chave"}.
 {"Choose a username and password to register with this server","Escolha um nome de utilizador e palavra-chave para se registar neste servidor"}.
-{"Choose modules to stop","Seleccione os módulos a parar"}.
 {"Choose storage type of tables","Seleccione o tipo de armazenagem das tabelas"}.
 {"City","Cidade"}.
 {"Conference room does not exist","A sala não existe"}.
@@ -31,15 +30,12 @@
 {"Edit Properties","Editar propriedades"}.
 {"ejabberd MUC module","Módulo MUC de ejabberd"}.
 {"ejabberd vCard module","Módulo vCard de ejabberd"}.
-{"Enter list of {Module, [Options]}","Introduza lista de {módulos, [opções]}"}.
 {"Enter nickname you want to register","Introduza a alcunha que quer registar"}.
 {"Enter path to backup file","Introduza o caminho do ficheiro de cópia de segurança"}.
 {"Enter path to jabberd14 spool dir","Introduza o caminho para o directório de spools do jabberd14"}.
 {"Enter path to jabberd14 spool file","Introduza o caminho para o ficheiro de spool do jabberd14"}.
 {"Enter path to text file","Introduza caminho para o ficheiro de texto"}.
-{"Erlang Jabber Server","Servidor Jabber em Erlang"}.
 {"Family Name","Apelido"}.
-{"From ~s","De ~s"}.
 {"From","De"}.
 {"Full Name","Nome completo"}.
 {"Groups","Grupos"}.
@@ -52,14 +48,10 @@
 {"It is not allowed to send private messages of type \"groupchat\"","Não é permitido enviar mensagens privadas do tipo \"groupchat\""}.
 {"It is not allowed to send private messages to the conference","Impedir o envio de mensagens privadas para a sala"}.
 {"Last Activity","Última actividade"}.
-{"List of modules to start","Lista de módulos a iniciar"}.
-{"Listened Ports at ","Portas em escuta em "}.
 {"Make room moderated","Tornar a sala moderada"}.
 {"Memory","Memória"}.
 {"Middle Name","Segundo nome"}.
 {"Moderator privileges required","São necessários privilégios de moderador"}.
-{"Module","Módulo"}.
-{"Modules","Módulos"}.
 {"Name","Nome"}.
 {"Never","Nunca"}.
 {"Nickname Registration at ","Registo da alcunha em "}.
@@ -74,7 +66,6 @@
 {"Only occupants are allowed to send messages to the conference","Só os ocupantes podem enviar mensagens para a sala"}.
 {"Only occupants are allowed to send queries to the conference","Só os ocupantes podem enviar consultas para a sala"}.
 {"Only service administrators are allowed to send service messages","Só os administradores do serviço têm permissão para enviar mensagens de serviço"}.
-{"Options","Opções"}.
 {"Organization Name","Nome da organização"}.
 {"Organization Unit","Unidade da organização"}.
 {"Owner privileges required","São necessários privilégios de dono"}.
@@ -84,7 +75,6 @@
 {"Path to Dir","Caminho para o directório"}.
 {"Path to File","Caminho do ficheiro"}.
 {"Pending","Pendente"}.
-{"Port","Porta"}.
 {"private, ","privado"}.
 {"Queries to the conference members are not allowed in this room","Nesta sala não são permitidas consultas aos seus membros"}.
 {"RAM and disc copy","Cópia em RAM e em disco"}.
@@ -97,23 +87,15 @@
 {"Restore Backup from File at ","Restaura cópia de segurança a partir do ficheiro em "}.
 {"Restore","Restaurar"}.
 {"Room title","Título da sala"}.
-{"Roster of ","Lista de contactos de "}.
-{"Roster","Lista de contactos"}.
 {"Running Nodes","Nodos a correr"}.
-{"~s access rule configuration","Configuração das Regra de Acesso ~s"}.
 {"Search users in ","Procurar utilizadores em "}.
-{"Start Modules at ","Iniciar os módulos em "}.
-{"Start Modules","Iniciar módulos"}.
 {"Statistics","Estatísticas"}.
-{"Stop Modules at ","Parar módulos em "}.
-{"Stop Modules","Parar módulos"}.
 {"Stop","Parar"}.
 {"Stopped Nodes","Nodos parados"}.
 {"Storage Type","Tipo de armazenagem"}.
 {"Submit","Enviar"}.
 {"Subscription","Subscrição"}.
 {"Time","Data"}.
-{"To ~s","A ~s"}.
 {"To","Para"}.
 {"Update","Actualizar"}.
 {"Users","Utilizadores"}.

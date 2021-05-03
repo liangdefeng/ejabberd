@@ -1,28 +1,20 @@
 language: erlang
 
 otp_release:
-  - 19.1
-  - 20.3
-  - 21.2
+  - 19.3
+  - 23.1.2
+
+os: linux
+
+dist: xenial
 
 services:
-  - redis-server
+  - redis
+  - mysql
+  - postgresql
 
 before_install:
-  #
-  # We need MySQL 5.6 or newer in order to get support for FULLTEXT indexes
-  # with InnoDB. As soon as Travis ships that version, the following lines
-  # (except for the "apt-get update" call) can go away.
-  #
-  # See: https://github.com/travis-ci/travis-ci/issues/1986
-  #
-  - sudo sed -i -e s/table_cache/table_open_cache/ -e /log_slow_queries/d /etc/mysql/my.cnf
-  - sudo apt-key adv --import .travis/mysql_repo_key.asc
-  - sudo add-apt-repository 'deb http://repo.mysql.com/apt/ubuntu/ precise mysql-5.6'
   - sudo apt-get -qq update
-  - sudo apt-get -qq -o Dpkg::Options::=--force-confold install mysql-server
-  - sudo mysql_upgrade
-  # /END MYSQL 5.6
   - pip install --user coveralls-merge
 
 install:
@@ -39,10 +31,16 @@ before_script:
   - psql -U postgres ejabberd_test -f sql/pg.sql
   - psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ejabberd_test TO ejabberd_test;"
   - psql -U postgres ejabberd_test -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ejabberd_test;"
+  - psql -U postgres ejabberd_test -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO ejabberd_test;"
+
+cache:
+  directories:
+  - deps/
 
 script:
   - ./autogen.sh
-  - ./configure --prefix=/tmp/ejabberd --enable-all --disable-odbc --disable-riak
+  - ./configure --prefix=/tmp/ejabberd --enable-all --disable-odbc --disable-elixir
+  - make update
   - make
   - make install -s
   - make xref
@@ -53,6 +51,7 @@ script:
   - echo '{ct_extra_params, "-verbosity 20"}.' >> rebar.config
   - escript ./rebar skip_deps=true ct -v
   - grep -q 'TEST COMPLETE,.* 0 failed' logs/raw.log
+  - test $(find logs -empty -name error.log)
 
 after_script:
   - find logs -name suite.log -exec cat '{}' ';'
@@ -60,7 +59,7 @@ after_script:
 after_failure:
   - find logs -name exunit.log -exec cat '{}' ';'
   - find logs -name ejabberd.log -exec cat '{}' ';'
-  - find logs -name suite.log -exec cat '{}' ';' | awk 'BEGIN{RS="\n=case";FS="\n"} /=result\s*failed/ {print "=case" $0}
+  - find logs -name suite.log -exec cat '{}' ';' | awk 'BEGIN{RS="\n=case";FS="\n"} /=result\s*failed/ {print "=case" $0}'
 
 after_success:
   - coveralls-merge erlang.json

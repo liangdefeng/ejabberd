@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author Evgeny Khramtsov <ekhramtsov@process-one.net>
-%%% @copyright (C) 2002-2019 ProcessOne, SARL. All Rights Reserved.
+%%% @copyright (C) 2002-2021 ProcessOne, SARL. All Rights Reserved.
 %%%
 %%% Licensed under the Apache License, Version 2.0 (the "License");
 %%% you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3, format_status/2]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("ejabberd_http.hrl").
 -include("logger.hrl").
 
@@ -101,13 +101,13 @@ handle_call({send, Data}, _From, #state{ws_pid = WsPid} = State) ->
     WsPid ! {data, Data},
     {reply, ok, State};
 handle_call(Request, From, State) ->
-    ?WARNING_MSG("Got unexpected call from ~p: ~p", [From, Request]),
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
     {noreply, State}.
 
 handle_cast(close, State) ->
     {stop, normal, State#state{mqtt_session = undefined}};
 handle_cast(Request, State) ->
-    ?WARNING_MSG("Got unexpected cast: ~p", [Request]),
+    ?WARNING_MSG("Unexpected cast: ~p", [Request]),
     {noreply, State}.
 
 handle_info(closed, State) ->
@@ -119,7 +119,7 @@ handle_info({'DOWN', _, process, Pid, _}, State)
   when Pid == State#state.mqtt_session orelse Pid == State#state.ws_pid ->
     {stop, normal, State};
 handle_info(Info, State) ->
-    ?WARNING_MSG("Got unexpected info: ~p", [Info]),
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     {noreply, State}.
 
 terminate(_Reason, State) ->

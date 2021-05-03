@@ -4,7 +4,7 @@
 %% Created :  14 Sep 2018 Pawel Chmielowski
 %%
 %%
-%% ejabberd, Copyright (C) 2002-2019  ProcessOne
+%% ejabberd, Copyright (C) 2002-2021  ProcessOne
 %%
 %% This program is free software; you can redistribute it and/or
 %% modify it under the terms of the GNU General Public License as
@@ -24,7 +24,7 @@
 -module(xml_compress_gen).
 -author("pawel@process-one.net").
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 %% API
 -export([archive_analyze/3, process_stats/1, gen_code/3]).
@@ -33,7 +33,7 @@
 -record(attr_stats, {count = 0, vals = #{}}).
 
 archive_analyze(Host, Table, EHost) ->
-    case ejabberd_sql:sql_query(Host, <<"select username, peer, kind, xml from ", Table/binary>>) of
+    case ejabberd_sql:sql_query(Host, [<<"select username, peer, kind, xml from ", Table/binary>>]) of
 	{selected, _, Res} ->
 	    lists:foldl(
 		fun([U, P, K, X], Stats) ->
@@ -76,7 +76,7 @@ gen_code(File, Rules, Ver) when Ver < 64 ->
 		end, Id + 1, Text),
 	    {lists:keystore(Ns, 1, Acc, {Ns, NsC ++ [{El, encode_id(Id), AttrsE, TextE}]}), Id5}
 	end, {[], 5}, Rules),
-    {ok, Dev} = file:open(File, write),
+    {ok, Dev} = file:open(File, [write]),
     Mod = filename:basename(File, ".erl"),
     io:format(Dev, "-module(~s).~n-export([encode/3, decode/3]).~n~n", [Mod]),
     RulesS = iolist_to_binary(io_lib:format("~p", [Rules])),

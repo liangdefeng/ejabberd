@@ -5,7 +5,7 @@
 %%% Created :  1 Dec 2007 by Christophe Romain <christophe.romain@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -42,7 +42,7 @@
     get_subscriptions/2, set_subscriptions/4,
     get_pending_nodes/2, get_states/1, get_state/2,
     set_state/1, get_items/7, get_items/3, get_item/7,
-    get_last_items/3,
+    get_last_items/3, get_only_item/2,
     get_item/2, set_item/1, get_item_name/3, node_to_path/1,
     path_to_node/1, depends/3]).
 
@@ -128,7 +128,7 @@ subscribe_node(Nidx, Sender, Subscriber, AccessModel,
 unsubscribe_node(Nidx, Sender, Subscriber, SubId) ->
     case node_flat:unsubscribe_node(Nidx, Sender, Subscriber, SubId) of
 	{error, Error} -> {error, Error};
-	{result, _} -> {result, []}
+	{result, _} -> {result, default}
     end.
 
 publish_item(Nidx, Publisher, Model, MaxItems, ItemId, Payload, PubOpts) ->
@@ -230,6 +230,9 @@ get_items(Nidx, JID, AccessModel, PresenceSubscription, RosterGroup, SubId, RSM)
 
 get_last_items(Nidx, From, Count) ->
     node_flat:get_last_items(Nidx, From, Count).
+
+get_only_item(Nidx, From) ->
+    node_flat:get_only_item(Nidx, From).
 
 get_item(Nidx, ItemId) ->
     node_flat:get_item(Nidx, ItemId).

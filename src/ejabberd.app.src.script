@@ -1,0 +1,33 @@
+Vars = case file:consult(filename:join([filename:dirname(SCRIPT), "..", "vars.config"])) of
+    {ok, Terms} ->
+        Backends = [mssql, mysql, odbc, pgsql, redis, sqlite],
+        EBs = lists:filter(fun(Backend) -> lists:member({Backend, true}, Terms) end, Backends),
+        [lists:keyfind(description, 1, Terms),
+         lists:keyfind(vsn, 1, Terms),
+         {env, [{enabled_backends, EBs}]}
+        ];
+    _Err ->
+        []
+    end,
+
+{application, ejabberd,
+ Vars ++
+ [{modules, []},
+  {registered, []},
+  {applications, [kernel, sasl, ssl, stdlib]},
+  {included_applications,
+    [inets, mnesia, os_mon,
+     cache_tab,
+     eimp,
+     fast_tls,
+     fast_yaml,
+     lager,
+     p1_utils,
+     pkix,
+     xmpp]},
+  {mod, {ejabberd_app, []}}]}.
+
+%% Local Variables:
+%% mode: erlang
+%% End:
+%% vim: set filetype=erlang tabstop=8:

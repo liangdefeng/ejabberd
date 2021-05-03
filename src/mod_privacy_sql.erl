@@ -4,7 +4,7 @@
 %%% Created : 14 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,7 +24,6 @@
 
 -module(mod_privacy_sql).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -behaviour(mod_privacy).
 
@@ -35,7 +34,7 @@
 
 -export([item_to_raw/1, raw_to_item/1]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_privacy.hrl").
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -287,7 +286,7 @@ raw_to_item({SType, SValue, SAction, Order, MatchAll,
                    match_presence_in = MatchPresenceIn,
                    match_presence_out = MatchPresenceOut}]
     catch _:_ ->
-            ?WARNING_MSG("failed to parse row: ~p", [Row]),
+            ?WARNING_MSG("Failed to parse row: ~p", [Row]),
             []
     end.
 

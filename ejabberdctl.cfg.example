@@ -13,24 +13,10 @@
 #POLL=true
 
 #.
-#' SMP: SMP support ([enable|auto|disable])
-#
-# Explanation in Erlang/OTP documentation:
-# enable: starts the Erlang runtime system with SMP support enabled.
-#   This may fail if no runtime system with SMP support is available.
-# auto: starts the Erlang runtime system with SMP support enabled if it
-#   is available and more than one logical processor are detected.
-# disable: starts a runtime system without SMP support.
-#
-# Default: auto
-#
-#SMP=auto
-
-#.
 #' ERL_MAX_PORTS: Maximum number of simultaneously open Erlang ports
 #
 # ejabberd consumes two or three ports for every connection, either
-# from a client or from another Jabber server. So take this into
+# from a client or from another XMPP server. So take this into
 # account when setting this limit.
 #
 # Default: 65536 (or 8196 on Windows)
@@ -41,7 +27,7 @@
 #.
 #' FIREWALL_WINDOW: Range of allowed ports to pass through a firewall
 #
-# If Ejabberd is configured to run in cluster, and a firewall is blocking ports,
+# If ejabberd is configured to run in cluster, and a firewall is blocking ports,
 # it's possible to make Erlang use a defined range of port (instead of dynamic
 # ports) for node communication.
 #
@@ -62,8 +48,6 @@
 
 #.
 #' ERL_EPMD_ADDRESS: IP addresses where epmd listens for connections
-#
-# IMPORTANT: This option works only in Erlang/OTP R14B03 and newer.
 #
 # This environment variable may be set to a comma-separated
 # list of IP addresses, in which case the epmd daemon

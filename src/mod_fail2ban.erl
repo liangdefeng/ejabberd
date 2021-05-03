@@ -5,7 +5,7 @@
 %%% Created : 15 Aug 2014 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2014-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2014-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -34,7 +34,7 @@
 
 -export([init/1, handle_call/3, handle_cast/2,
 	 handle_info/2, terminate/2, code_change/3,
-	 mod_opt_type/1, mod_options/1, depends/2]).
+	 mod_opt_type/1, mod_options/1, depends/2, mod_doc/0]).
 
 %% ejabberd command.
 -export([get_commands_spec/0, unban/1]).
@@ -42,7 +42,8 @@
 -include_lib("stdlib/include/ms_transform.hrl").
 -include("ejabberd_commands.hrl").
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
+-include("translate.hrl").
 
 -define(CLEAN_INTERVAL, timer:minutes(10)).
 
@@ -61,11 +62,9 @@ c2s_auth_result(#{ip := {Addr, _}, lserver := LServer} = State, {false, _}, _Use
 	true ->
 	    State;
 	false ->
-	    BanLifetime = gen_mod:get_module_opt(
-			    LServer, ?MODULE, c2s_auth_ban_lifetime),
-	    MaxFailures = gen_mod:get_module_opt(
-			    LServer, ?MODULE, c2s_max_auth_failures),
-	    UnbanTS = erlang:system_time(second) + BanLifetime,
+	    BanLifetime = mod_fail2ban_opt:c2s_auth_ban_lifetime(LServer),
+	    MaxFailures = mod_fail2ban_opt:c2s_max_auth_failures(LServer),
+	    UnbanTS = current_time() + BanLifetime,
 	    Attempts = case ets:lookup(failed_auth, Addr) of
 		[{Addr, N, _, _}] ->
 			       ets:insert(failed_auth,
@@ -91,7 +90,7 @@ c2s_auth_result(#{ip := {Addr, _}} = State, true, _User) ->
 c2s_stream_started(#{ip := {Addr, _}} = State, _) ->
     case ets:lookup(failed_auth, Addr) of
 	[{Addr, N, TS, MaxFailures}] when N >= MaxFailures ->
-	    case TS > erlang:system_time(second) of
+	    case TS > current_time() of
 		true ->
 		    log_and_disconnect(State, N, TS);
 		false ->
@@ -129,31 +128,31 @@ depends(_Host, _Opts) ->
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
-init([Host, _Opts]) ->
+init([Host|_]) ->
     process_flag(trap_exit, true),
     ejabberd_hooks:add(c2s_auth_result, Host, ?MODULE, c2s_auth_result, 100),
     ejabberd_hooks:add(c2s_stream_started, Host, ?MODULE, c2s_stream_started, 100),
     erlang:send_after(?CLEAN_INTERVAL, self(), clean),
     {ok, #state{host = Host}}.
 
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call(Request, From, State) ->
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    {noreply, State}.
 
 handle_cast(_Msg, State) ->
-    ?ERROR_MSG("got unexpected cast = ~p", [_Msg]),
+    ?WARNING_MSG("Unexpected cast = ~p", [_Msg]),
     {noreply, State}.
 
 handle_info(clean, State) ->
-    ?DEBUG("cleaning ~p ETS table", [failed_auth]),
-    Now = erlang:system_time(second),
+    ?DEBUG("Cleaning ~p ETS table", [failed_auth]),
+    Now = current_time(),
     ets:select_delete(
       failed_auth,
       ets:fun2ms(fun({_, _, UnbanTS, _}) -> UnbanTS =< Now end)),
     erlang:send_after(?CLEAN_INTERVAL, self(), clean),
     {noreply, State};
 handle_info(_Info, State) ->
-    ?ERROR_MSG("got unexpected info = ~p", [_Info]),
+    ?WARNING_MSG("Unexpected info = ~p", [_Info]),
     {noreply, State}.
 
 terminate(_Reason, #state{host = Host}) ->
@@ -186,28 +185,27 @@ get_commands_spec() ->
 			result_desc = "Amount of unbanned entries, or negative in case of error.",
 			result = {unbanned, integer}}].
 
--spec unban(string()) -> integer().
+-spec unban(binary()) -> integer().
 unban(S) ->
-    case acl:parse_ip_netmask(S) of
-	{ok, Net, Mask} ->
+    case misc:parse_ip_mask(S) of
+	{ok, {Net, Mask}} ->
 	    unban(Net, Mask);
 	error ->
 	    ?WARNING_MSG("Invalid network address when trying to unban: ~p", [S]),
 	    -1
     end.
 
+-spec unban(inet:ip_address(), 0..128) -> non_neg_integer().
 unban(Net, Mask) ->
     ets:foldl(
 	fun({Addr, _, _, _}, Acc)  ->
-	    case acl:ip_matches_mask(Addr, Net, Mask) of
+	    case misc:match_ip_mask(Addr, Net, Mask) of
 		true ->
 		    ets:delete(failed_auth, Addr),
 		    Acc+1;
 		false -> Acc
 	    end
-	end,
-	0,
-	failed_auth).
+	end, 0, failed_auth).
 
 %%%===================================================================
 %%% Internal functions
@@ -217,35 +215,78 @@ unban(Net, Mask) ->
 log_and_disconnect(#{ip := {Addr, _}, lang := Lang} = State, Attempts, UnbanTS) ->
     IP = misc:ip_to_list(Addr),
     UnbanDate = format_date(
-		  calendar:now_to_universal_time(seconds_to_now(UnbanTS))),
-    Format = <<"Too many (~p) failed authentications "
-	       "from this IP address (~s). The address "
-	       "will be unblocked at ~s UTC">>,
+		  calendar:now_to_universal_time(msec_to_now(UnbanTS))),
+    Format = ?T("Too many (~p) failed authentications "
+		"from this IP address (~s). The address "
+		"will be unblocked at ~s UTC"),
     Args = [Attempts, IP, UnbanDate],
-    ?WARNING_MSG("Connection attempt from blacklisted IP ~s: ~s",
+    ?WARNING_MSG("Connection attempt from blacklisted IP ~ts: ~ts",
 		 [IP, io_lib:fwrite(Format, Args)]),
     Err = xmpp:serr_policy_violation({Format, Args}, Lang),
     {stop, ejabberd_c2s:send(State, Err)}.
 
+-spec is_whitelisted(binary(), inet:ip_address()) -> boolean().
 is_whitelisted(Host, Addr) ->
-    Access = gen_mod:get_module_opt(Host, ?MODULE, access),
+    Access = mod_fail2ban_opt:access(Host),
     acl:match_rule(Host, Access, Addr) == allow.
 
-seconds_to_now(Secs) ->
+-spec msec_to_now(pos_integer()) -> erlang:timestamp().
+msec_to_now(MSecs) ->
+    Secs = MSecs div 1000,
     {Secs div 1000000, Secs rem 1000000, 0}.
 
+-spec format_date(calendar:datetime()) -> iolist().
 format_date({{Year, Month, Day}, {Hour, Minute, Second}}) ->
     io_lib:format("~2..0w:~2..0w:~2..0w ~2..0w.~2..0w.~4..0w",
 		  [Hour, Minute, Second, Day, Month, Year]).
 
+current_time() ->
+    erlang:system_time(millisecond).
+
 mod_opt_type(access) ->
-    fun acl:access_rules_validator/1;
+    econf:acl();
 mod_opt_type(c2s_auth_ban_lifetime) ->
-    fun (T) when is_integer(T), T > 0 -> T end;
+    econf:timeout(second);
 mod_opt_type(c2s_max_auth_failures) ->
-    fun (I) when is_integer(I), I > 0 -> I end.
+    econf:pos_int().
 
 mod_options(_Host) ->
     [{access, none},
-     {c2s_auth_ban_lifetime, 3600}, %% one hour
+     {c2s_auth_ban_lifetime, timer:hours(1)},
      {c2s_max_auth_failures, 20}].
+
+mod_doc() ->
+    #{desc =>
+          [?T("The module bans IPs that show the malicious signs. "
+              "Currently only C2S authentication failures are detected."), "",
+           ?T("Unlike the standalone program, 'mod_fail2ban' clears the "
+              "record of authentication failures after some time since the "
+              "first failure or on a successful authentication. "
+              "It also does not simply block network traffic, but "
+              "provides the client with a descriptive error message."), "",
+	   ?T("WARNING: You should not use this module behind a proxy or load "
+	      "balancer. ejabberd will see the failures as coming from the "
+	      "load balancer and, when the threshold of auth failures is "
+	      "reached, will reject all connections coming from the load "
+	      "balancer. You can lock all your user base out of ejabberd "
+	      "when using this module behind a proxy.")],
+      opts =>
+          [{access,
+            #{value => ?T("AccessName"),
+              desc =>
+                  ?T("Specify an access rule for whitelisting IP "
+                     "addresses or networks. If the rule returns 'allow' "
+                     "for a given IP address, that address will never be "
+                     "banned. The 'AccessName' should be of type 'ip'. "
+                     "The default value is 'none'.")}},
+           {c2s_auth_ban_lifetime,
+            #{value => "timeout()",
+              desc =>
+                  ?T("The lifetime of the IP ban caused by too many "
+                     "C2S authentication failures. The default value is "
+                     "'1' hour.")}},
+           {c2s_max_auth_failures,
+            #{value => ?T("Number"),
+              desc =>
+                  ?T("The number of C2S authentication failures to "
+                     "trigger the IP ban. The default value is '20'.")}}]}.

@@ -1,11 +1,11 @@
 %%%----------------------------------------------------------------------
 %%% File    : ejabberd_auth_sql.erl
 %%% Author  : Alexey Shchepin <alexey@process-one.net>
-%%% Purpose : Authentification via ODBC
+%%% Purpose : Authentication via ODBC
 %%% Created : 12 Dec 2004 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -25,19 +25,17 @@
 
 -module(ejabberd_auth_sql).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -author('alexey@process-one.net').
 
 -behaviour(ejabberd_auth).
--behaviour(ejabberd_config).
 
 -export([start/1, stop/1, set_password/3, try_register/3,
 	 get_users/2, count_users/2, get_password/2,
 	 remove_user/2, store_type/1, plain_password_required/1,
-	 convert_to_scram/1, opt_type/1, export/1, which_users_exists/2]).
+	 export/1, which_users_exists/2]).
 
--include("scram.hrl").
+-include_lib("xmpp/include/scram.hrl").
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
 -include("ejabberd_auth.hrl").
@@ -58,35 +56,41 @@ store_type(Server) ->
     ejabberd_auth:password_format(Server).
 
 set_password(User, Server, Password) ->
-    F = fun() ->
-		if is_record(Password, scram) ->
-			set_password_scram_t(
-			  User, Server,
-			  Password#scram.storedkey, Password#scram.serverkey,
-			  Password#scram.salt, Password#scram.iterationcount);
-		   true ->
-			set_password_t(User, Server, Password)
-		end
-	end,
+    F =
+    fun() ->
+	case Password of
+	    #scram{hash = Hash, storedkey = SK, serverkey = SEK,
+		   salt = Salt, iterationcount = IC} ->
+		SK2 = scram_hash_encode(Hash, SK),
+		set_password_scram_t(
+		    User, Server,
+		    SK2, SEK, Salt, IC);
+	    _ ->
+		set_password_t(User, Server, Password)
+	end
+    end,
     case ejabberd_sql:sql_transaction(Server, F) of
 	{atomic, _} ->
-	    ok;
+	    {cache, {ok, Password}};
 	{aborted, _} ->
-	    {error, db_failure}
+	    {nocache, {error, db_failure}}
     end.
 
 try_register(User, Server, Password) ->
-    Res = if is_record(Password, scram) ->
-		  add_user_scram(
-		    Server, User,
-		    Password#scram.storedkey, Password#scram.serverkey,
-		    Password#scram.salt, Password#scram.iterationcount);
-	     true ->
-		  add_user(Server, User, Password)
-	  end,
+    Res =
+    case Password of
+	#scram{hash = Hash, storedkey = SK, serverkey = SEK,
+	       salt = Salt, iterationcount = IC} ->
+	    SK2 = scram_hash_encode(Hash, SK),
+	    add_user_scram(
+		Server, User,
+		SK2, SEK, Salt, IC);
+	_ ->
+	    add_user(Server, User, Password)
+    end,
     case Res of
-	{updated, 1} -> ok;
-	_ -> {error, exists}
+	{updated, 1} -> {cache, {ok, Password}};
+	_ -> {nocache, {error, exists}}
     end.
 
 get_users(Server, Opts) ->
@@ -106,16 +110,22 @@ count_users(Server, Opts) ->
 get_password(User, Server) ->
     case get_password_scram(Server, User) of
 	{selected, [{Password, <<>>, <<>>, 0}]} ->
-	    {ok, Password};
+	    {cache, {ok, Password}};
 	{selected, [{StoredKey, ServerKey, Salt, IterationCount}]} ->
-	    {ok, #scram{storedkey = StoredKey,
-			serverkey = ServerKey,
-			salt = Salt,
-			iterationcount = IterationCount}};
+	    {Hash, SK} = case StoredKey of
+			     <<"sha256:", Rest/binary>> -> {sha256, Rest};
+			     <<"sha512:", Rest/binary>> -> {sha512, Rest};
+			     Other -> {sha, Other}
+			 end,
+	    {cache, {ok, #scram{storedkey = SK,
+				serverkey = ServerKey,
+				salt = Salt,
+				hash = Hash,
+				iterationcount = IterationCount}}};
 	{selected, []} ->
-	    error;
+	    {cache, error};
 	_ ->
-	    error
+	    {nocache, error}
     end.
 
 remove_user(User, Server) ->
@@ -127,6 +137,13 @@ remove_user(User, Server) ->
     end.
 
 -define(BATCH_SIZE, 1000).
+
+scram_hash_encode(Hash, StoreKey) ->
+    case Hash of
+	sha -> StoreKey;
+	sha256 -> <<"sha256:", StoreKey/binary>>;
+	sha512 -> <<"sha512:", StoreKey/binary>>
+    end.
 
 set_password_scram_t(LUser, LServer,
                      StoredKey, ServerKey, Salt, IterationCount) ->
@@ -207,12 +224,12 @@ list_users(LServer,
 	   [{prefix, Prefix}, {limit, Limit}, {offset, Offset}])
     when is_binary(Prefix) and is_integer(Limit) and
 	   is_integer(Offset) ->
-    SPrefix = ejabberd_sql:escape_like_arg_circumflex(Prefix),
+    SPrefix = ejabberd_sql:escape_like_arg(Prefix),
     SPrefix2 = <<SPrefix/binary, $%>>,
     ejabberd_sql:sql_query(
       LServer,
       ?SQL("select @(username)s from users "
-           "where username like %(SPrefix2)s escape '^' and %(LServer)H "
+           "where username like %(SPrefix2)s %ESCAPE and %(LServer)H "
            "order by username "
            "limit %(Limit)d offset %(Offset)d")).
 
@@ -221,8 +238,7 @@ users_number(LServer) ->
       LServer,
       fun(pgsql, _) ->
               case
-                  ejabberd_config:get_option(
-                    {pgsql_users_number_estimate, LServer}, false) of
+                  ejabberd_option:pgsql_users_number_estimate(LServer) of
                   true ->
                       ejabberd_sql:sql_query_t(
                         ?SQL("select @(reltuples :: bigint)d from pg_class"
@@ -238,12 +254,12 @@ users_number(LServer) ->
 
 users_number(LServer, [{prefix, Prefix}])
     when is_binary(Prefix) ->
-    SPrefix = ejabberd_sql:escape_like_arg_circumflex(Prefix),
+    SPrefix = ejabberd_sql:escape_like_arg(Prefix),
     SPrefix2 = <<SPrefix/binary, $%>>,
     ejabberd_sql:sql_query(
       LServer,
       ?SQL("select @(count(*))d from users "
-           "where username like %(SPrefix2)s escape '^' and %(LServer)H"));
+           "where username like %(SPrefix2)s %ESCAPE and %(LServer)H"));
 users_number(LServer, []) ->
     users_number(LServer).
 
@@ -272,54 +288,6 @@ which_users_exists(LServer, LUsers) ->
             end
     end.
 
-
-convert_to_scram(Server) ->
-    LServer = jid:nameprep(Server),
-    if
-        LServer == error;
-        LServer == <<>> ->
-            {error, {incorrect_server_name, Server}};
-        true ->
-            F = fun () ->
-                        BatchSize = ?BATCH_SIZE,
-                        case ejabberd_sql:sql_query_t(
-                               ?SQL("select @(username)s, @(password)s"
-                                    " from users"
-                                    " where iterationcount=0 and %(LServer)H"
-                                    " limit %(BatchSize)d")) of
-                            {selected, []} ->
-                                ok;
-                            {selected, Rs} ->
-                                lists:foreach(
-                                  fun({LUser, Password}) ->
-					  case jid:resourceprep(Password) of
-					      error ->
-						  ?ERROR_MSG(
-						     "SASLprep failed for "
-						     "password of user ~s@~s",
-						     [LUser, LServer]);
-					      _ ->
-						  Scram = ejabberd_auth:password_to_scram(Password),
-						  set_password_scram_t(
-						    LUser, LServer,
-						    Scram#scram.storedkey,
-						    Scram#scram.serverkey,
-						    Scram#scram.salt,
-						    Scram#scram.iterationcount)
-					  end
-                                  end, Rs),
-                                continue;
-                            Err -> {bad_reply, Err}
-                        end
-                end,
-            case ejabberd_sql:sql_transaction(LServer, F) of
-                {atomic, ok} -> ok;
-                {atomic, continue} -> convert_to_scram(Server);
-                {atomic, Error} -> {error, Error};
-                Error -> Error
-            end
-    end.
-
 export(_Server) ->
     [{passwd,
       fun(Host, #passwd{us = {LUser, LServer}, password = Password})
@@ -333,7 +301,7 @@ export(_Server) ->
                    "password=%(Password)s"])];
          (Host, #passwd{us = {LUser, LServer}, password = #scram{} = Scram})
             when LServer == Host ->
-              StoredKey = Scram#scram.storedkey,
+	      StoredKey = scram_hash_encode(Scram#scram.hash, Scram#scram.storedkey),
               ServerKey = Scram#scram.serverkey,
               Salt = Scram#scram.salt,
               IterationCount = Scram#scram.iterationcount,
@@ -349,8 +317,3 @@ export(_Server) ->
          (_Host, _R) ->
               []
       end}].
-
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
-opt_type(pgsql_users_number_estimate) ->
-    fun (V) when is_boolean(V) -> V end;
-opt_type(_) -> [pgsql_users_number_estimate].

@@ -4,7 +4,7 @@
 %%% Created : 15 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,7 +24,6 @@
 
 -module(mod_mam_sql).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -behaviour(mod_mam).
 
@@ -34,7 +33,7 @@
 	 is_empty_for_user/2, is_empty_for_room/3, select_with_mucsub/6]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_mam.hrl").
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -106,7 +105,8 @@ store(Pkt, LServer, {LUser, LHost}, Type, Peer, Nick, _Dir, TS) ->
 	      jid:tolower(Peer)),
     Body = fxml:get_subtag_cdata(Pkt, <<"body">>),
     SType = misc:atom_to_binary(Type),
-    XML = case gen_mod:get_module_opt(LServer, mod_mam, compress_xml) of
+    SqlType = ejabberd_option:sql_type(LServer),
+    XML = case mod_mam_opt:compress_xml(LServer) of
 	      true ->
 		  J1 = case Type of
 			      chat -> jid:encode({LUser, LHost, <<>>});
@@ -116,24 +116,44 @@ store(Pkt, LServer, {LUser, LHost}, Type, Peer, Nick, _Dir, TS) ->
 	      _ ->
 		  fxml:element_to_binary(Pkt)
 	  end,
-    case ejabberd_sql:sql_query(
-           LServer,
-           ?SQL_INSERT(
-              "archive",
-              ["username=%(SUser)s",
-               "server_host=%(LServer)s",
-               "timestamp=%(TS)d",
-               "peer=%(LPeer)s",
-               "bare_peer=%(BarePeer)s",
-               "xml=%(XML)s",
-               "txt=%(Body)s",
-               "kind=%(SType)s",
-               "nick=%(Nick)s"])) of
-	{updated, _} ->
-	    ok;
-	Err ->
-	    Err
-    end.
+	case SqlType of
+	  mssql -> case ejabberd_sql:sql_query(
+	           LServer,
+	           ?SQL_INSERT(
+	              "archive",
+	              ["username=%(SUser)s",
+	               "server_host=%(LServer)s",
+	               "timestamp=%(TS)d",
+	               "peer=%(LPeer)s",
+	               "bare_peer=%(BarePeer)s",
+	               "xml=N%(XML)s",
+	               "txt=N%(Body)s",
+	               "kind=%(SType)s",
+	               "nick=%(Nick)s"])) of
+		{updated, _} ->
+		    ok;
+		Err ->
+		    Err
+	    end;
+	    _ -> case ejabberd_sql:sql_query(
+	           LServer,
+	           ?SQL_INSERT(
+	              "archive",
+	              ["username=%(SUser)s",
+	               "server_host=%(LServer)s",
+	               "timestamp=%(TS)d",
+	               "peer=%(LPeer)s",
+	               "bare_peer=%(BarePeer)s",
+	               "xml=%(XML)s",
+	               "txt=%(Body)s",
+	               "kind=%(SType)s",
+	               "nick=%(Nick)s"])) of
+		{updated, _} ->
+		    ok;
+		Err ->
+		    Err
+	    end
+	end.
 
 write_prefs(LUser, _LServer, #archive_prefs{default = Default,
 					   never = Never,
@@ -184,7 +204,7 @@ select(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
 
 -spec select_with_mucsub(binary(), jid(), jid(), mam_query:result(),
 			     #rsm_set{} | undefined, all | only_count | only_messages) ->
-				{[{binary(), non_neg_integer(), xmlel()}], boolean(), integer()} |
+				{[{binary(), non_neg_integer(), xmlel()}], boolean(), non_neg_integer()} |
 				{error, db_failure}.
 select_with_mucsub(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
 		   MAMQuery, RSM, Flags) ->
@@ -201,7 +221,7 @@ select_with_mucsub(LServer, JidRequestor, #jid{luser = LUser} = JidArchive,
 				   _ ->
 				       []
 			       end,
-		    [jid:encode(Jid) || {Jid, _} <- SubRooms]
+		    [jid:encode(Jid) || {Jid, _, _} <- SubRooms]
 	    end,
     {Query, CountQuery} = make_sql_query(LUser, LServer, MAMQuery, RSM, Extra),
     do_select_query(LServer, JidRequestor, JidArchive, RSM, chat, Query, CountQuery, Flags).
@@ -236,7 +256,7 @@ do_select_query(LServer, JidRequestor, #jid{luser = LUser} = JidArchive, RSM,
 		    {Res, true}
 	    end,
 	    MucState = #state{config = #config{anonymous = true}},
-	    JidArchiveS = jid:encode(JidArchive),
+	    JidArchiveS = jid:encode(jid:remove_resource(JidArchive)),
 	    {lists:flatmap(
 		fun([TS, XML, PeerBin, Kind, Nick]) ->
 		    case make_archive_el(JidArchiveS, TS, XML, PeerBin, Kind, Nick,
@@ -305,17 +325,31 @@ export(_Server) ->
                 XML = fxml:element_to_binary(Pkt),
                 Body = fxml:get_subtag_cdata(Pkt, <<"body">>),
                 SType = misc:atom_to_binary(Type),
-                [?SQL_INSERT(
-                    "archive",
-                    ["username=%(SUser)s",
-                     "server_host=%(LServer)s",
-                     "timestamp=%(TStmp)d",
-                     "peer=%(LPeer)s",
-                     "bare_peer=%(BarePeer)s",
-                     "xml=%(XML)s",
-                     "txt=%(Body)s",
-                     "kind=%(SType)s",
-                     "nick=%(Nick)s"])];
+                SqlType = ejabberd_option:sql_type(Host),
+                case SqlType of
+	                mssql -> [?SQL_INSERT(
+	                    "archive",
+	                    ["username=%(SUser)s",
+	                     "server_host=%(LServer)s",
+	                     "timestamp=%(TStmp)d",
+	                     "peer=%(LPeer)s",
+	                     "bare_peer=%(BarePeer)s",
+	                     "xml=N%(XML)s",
+	                     "txt=N%(Body)s",
+	                     "kind=%(SType)s",
+	                     "nick=%(Nick)s"])];
+	                _ -> [?SQL_INSERT(
+	                    "archive",
+	                    ["username=%(SUser)s",
+	                     "server_host=%(LServer)s",
+	                     "timestamp=%(TStmp)d",
+	                     "peer=%(LPeer)s",
+	                     "bare_peer=%(BarePeer)s",
+	                     "xml=%(XML)s",
+	                     "txt=%(Body)s",
+	                     "kind=%(SType)s",
+	                     "nick=%(Nick)s"])]
+		            end;
          (_Host, _R) ->
               []
       end}].
@@ -354,13 +388,8 @@ make_sql_query(User, LServer, MAMQuery, RSM, ExtraUsernames) ->
     With = proplists:get_value(with, MAMQuery),
     WithText = proplists:get_value(withtext, MAMQuery),
     {Max, Direction, ID} = get_max_direction_id(RSM),
-    ODBCType = ejabberd_config:get_option({sql_type, LServer}),
-    Escape =
-        case ODBCType of
-            mssql -> fun ejabberd_sql:standard_escape/1;
-            sqlite -> fun ejabberd_sql:standard_escape/1;
-            _ -> fun ejabberd_sql:escape/1
-        end,
+    ODBCType = ejabberd_option:sql_type(LServer),
+    ToString = fun(S) -> ejabberd_sql:to_string_literal(ODBCType, S) end,
     LimitClause = if is_integer(Max), Max >= 0, ODBCType /= mssql ->
 			  [<<" limit ">>, integer_to_binary(Max+1)];
 		     true ->
@@ -372,20 +401,18 @@ make_sql_query(User, LServer, MAMQuery, RSM, ExtraUsernames) ->
 			  []
 		  end,
     WithTextClause = if is_binary(WithText), WithText /= <<>> ->
-			     [<<" and match (txt) against ('">>,
-			      Escape(WithText), <<"')">>];
+			     [<<" and match (txt) against (">>,
+			      ToString(WithText), <<")">>];
 			true ->
 			     []
 		     end,
     WithClause = case catch jid:tolower(With) of
 		     {_, _, <<>>} ->
-			 [<<" and bare_peer='">>,
-			  Escape(jid:encode(With)),
-			  <<"'">>];
+			 [<<" and bare_peer=">>,
+			  ToString(jid:encode(With))];
 		     {_, _, _} ->
-			 [<<" and peer='">>,
-			  Escape(jid:encode(With)),
-			  <<"'">>];
+			 [<<" and peer=">>,
+			  ToString(jid:encode(With))];
 		     _ ->
 			 []
 		 end,
@@ -416,23 +443,23 @@ make_sql_query(User, LServer, MAMQuery, RSM, ExtraUsernames) ->
 		    _ ->
 			[]
 		end,
-    SUser = Escape(User),
-    SServer = Escape(LServer),
+    SUser = ToString(User),
+    SServer = ToString(LServer),
 
     HostMatch = case ejabberd_sql:use_new_schema() of
 		    true ->
-			[<<" and server_host='", SServer/binary, "'">>];
+			[<<" and server_host=", SServer/binary>>];
 		    _ ->
 			<<"">>
 		end,
 
     {UserSel, UserWhere} = case ExtraUsernames of
 			       Users when is_list(Users) ->
-				   EscUsers = [<<"'", (Escape(U))/binary, "'">> || U <- [User | Users]],
+				   EscUsers = [ToString(U) || U <- [User | Users]],
 				   {<<" username,">>,
 				    [<<" username in (">>, str:join(EscUsers, <<",">>), <<")">>]};
 			       subscribers_table ->
-				   SJid = Escape(jid:encode({User, LServer, <<>>})),
+				   SJid = ToString(jid:encode({User, LServer, <<>>})),
 				   RoomName = case ODBCType of
 						  sqlite ->
 						      <<"room || '@' || host">>;
@@ -440,11 +467,11 @@ make_sql_query(User, LServer, MAMQuery, RSM, ExtraUsernames) ->
 						      <<"concat(room, '@', host)">>
 					      end,
 				   {<<" username,">>,
-				    [<<" (username = '">>, SUser, <<"'">>,
+				    [<<" (username = ">>, SUser,
 					<<" or username in (select ">>, RoomName,
-					  <<" from muc_room_subscribers where jid='">>, SJid, <<"'">>, HostMatch, <<"))">>]};
+					  <<" from muc_room_subscribers where jid=">>, SJid, HostMatch, <<"))">>]};
 			       _ ->
-				   {<<>>, [<<" username='">>, SUser, <<"'">>]}
+				   {<<>>, [<<" username=">>, SUser]}
 			   end,
 
     Query = [<<"SELECT ">>, TopClause, UserSel,
@@ -516,21 +543,21 @@ make_archive_el(User, TS, XML, Peer, Kind, Nick, MsgType, JidRequestor, JidArchi
 			      MsgType, JidRequestor, JidArchive)
 		    catch _:{bad_jid, _} ->
 			    ?ERROR_MSG("Malformed 'peer' field with value "
-				       "'~s' detected for user ~s in table "
+				       "'~ts' detected for user ~ts in table "
 				       "'archive': invalid JID",
 				       [Peer, jid:encode(JidArchive)]),
 			    {error, invalid_jid}
 		    end
 	    catch _:_ ->
-		    ?ERROR_MSG("Malformed 'timestamp' field with value '~s' "
-			       "detected for user ~s in table 'archive': "
+		    ?ERROR_MSG("Malformed 'timestamp' field with value '~ts' "
+			       "detected for user ~ts in table 'archive': "
 			       "not an integer",
 			       [TS, jid:encode(JidArchive)]),
 		    {error, invalid_timestamp}
 	    end;
 	{error, {_, Reason}} ->
-	    ?ERROR_MSG("Malformed 'xml' field with value '~s' detected "
-		       "for user ~s in table 'archive': ~s",
+	    ?ERROR_MSG("Malformed 'xml' field with value '~ts' detected "
+		       "for user ~ts in table 'archive': ~ts",
 		       [XML, jid:encode(JidArchive), Reason]),
 	    {error, invalid_xml}
     end.

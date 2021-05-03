@@ -5,7 +5,7 @@
 %%% Created : 29 May 2007 by Badlop <badlop@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -41,19 +41,19 @@
 -export([init/1, handle_info/2, handle_call/3,
 	 handle_cast/2, terminate/2, code_change/3]).
 
--export([purge_loop/1, mod_opt_type/1, mod_options/1, depends/2]).
+-export([purge_loop/1, mod_opt_type/1, mod_options/1, depends/2, mod_doc/0]).
 
 -include("logger.hrl").
 -include("translate.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 -record(multicastc, {rserver :: binary(),
 		     response,
 		     ts :: integer()}).
 
 -record(dest, {jid_string :: binary() | none,
-	       jid_jid :: jid(),
-	       type :: to | cc | bcc,
+	       jid_jid :: jid() | undefined,
+	       type :: bcc | cc | noreply | ofrom | replyroom | replyto | to,
 	       address :: address()}).
 
 -type limit_value() :: {default | custom, integer()}.
@@ -67,9 +67,9 @@
 
 -record(group, {server :: binary(),
 		dests :: [#dest{}],
-		multicast :: routing(),
-		others :: [#address{}],
-		addresses :: [#address{}]}).
+		multicast :: routing() | undefined,
+		others :: [address()],
+		addresses :: [address()]}).
 
 -record(state, {lserver :: binary(),
 		lservice :: binary(),
@@ -151,11 +151,12 @@ user_send_packet(Acc) ->
 %%====================================================================
 
 -spec init(list()) -> {ok, state()}.
-init([LServerS, Opts]) ->
+init([LServerS|_]) ->
     process_flag(trap_exit, true),
-    [LServiceS|_] = gen_mod:get_opt_hosts(LServerS, Opts),
-    Access = gen_mod:get_opt(access, Opts),
-    SLimits = build_service_limit_record(gen_mod:get_opt(limits, Opts)),
+    Opts = gen_mod:get_module_opts(LServerS, ?MODULE),
+    [LServiceS|_] = gen_mod:get_opt_hosts(Opts),
+    Access = mod_multicast_opt:access(Opts),
+    SLimits = build_service_limit_record(mod_multicast_opt:limits(Opts)),
     create_cache(),
     try_start_loop(),
     ejabberd_router_multicast:register_route(LServerS),
@@ -171,9 +172,9 @@ handle_call(stop, _From, State) ->
 
 handle_cast({reload, NewOpts, NewOpts},
 	    #state{lserver = LServerS, lservice = OldLServiceS} = State) ->
-    Access = gen_mod:get_opt(access, NewOpts),
-    SLimits = build_service_limit_record(gen_mod:get_opt(limits, NewOpts)),
-    [NewLServiceS|_] = gen_mod:get_opt_hosts(LServerS, NewOpts),
+    Access = mod_multicast_opt:access(NewOpts),
+    SLimits = build_service_limit_record(mod_multicast_opt:limits(NewOpts)),
+    [NewLServiceS|_] = gen_mod:get_opt_hosts(NewOpts),
     if NewLServiceS /= OldLServiceS ->
 	    ejabberd_router:register_route(NewLServiceS, LServerS),
 	    ejabberd_router:unregister_route(OldLServiceS);
@@ -183,7 +184,7 @@ handle_cast({reload, NewOpts, NewOpts},
     {noreply, State#state{lservice = NewLServiceS,
 			  access = Access, service_limits = SLimits}};
 handle_cast(Msg, State) ->
-    ?WARNING_MSG("unexpected cast: ~p", [Msg]),
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -273,8 +274,8 @@ process_iq(#iq{type = get, lang = Lang, from = From,
     {result, iq_disco_info(From, Lang, State)};
 process_iq(#iq{type = get, sub_els = [#disco_items{}]}, _) ->
     {result, #disco_items{}};
-process_iq(#iq{type = get, lang = Lang, sub_els = [#vcard_temp{}]}, _) ->
-    {result, iq_vcard(Lang)};
+process_iq(#iq{type = get, lang = Lang, sub_els = [#vcard_temp{}]}, State) ->
+    {result, iq_vcard(Lang, State)};
 process_iq(#iq{type = T}, _) when T == set; T == get ->
     {error, xmpp:err_service_unavailable()};
 process_iq(_, _) ->
@@ -283,7 +284,7 @@ process_iq(_, _) ->
 -define(FEATURE(Feat), Feat).
 
 iq_disco_info(From, Lang, State) ->
-    Name = gen_mod:get_module_opt(State#state.lserver, ?MODULE, name),
+    Name = mod_multicast_opt:name(State#state.lserver),
     #disco_info{
        identities = [#identity{category = <<"service">>,
 			       type = <<"multicast">>,
@@ -291,10 +292,16 @@ iq_disco_info(From, Lang, State) ->
        features = [?NS_DISCO_INFO, ?NS_DISCO_ITEMS, ?NS_VCARD, ?NS_ADDRESS],
        xdata = iq_disco_info_extras(From, State)}.
 
-iq_vcard(Lang) ->
-    #vcard_temp{fn = <<"ejabberd/mod_multicast">>,
-		url = ejabberd_config:get_uri(),
-		desc = misc:get_descr(Lang, ?T("ejabberd Multicast service"))}.
+-spec iq_vcard(binary(), state()) -> #vcard_temp{}.
+iq_vcard(Lang, State) ->
+    case mod_multicast_opt:vcard(State#state.lserver) of
+	undefined ->
+	    #vcard_temp{fn = <<"ejabberd/mod_multicast">>,
+			url = ejabberd_config:get_uri(),
+			desc = misc:get_descr(Lang, ?T("ejabberd Multicast service"))};
+	VCard ->
+	    VCard
+    end.
 
 %%%-------------------------
 %%% Route
@@ -322,27 +329,27 @@ route_untrusted(LServiceS, LServerS, Access, SLimits, Packet) ->
     catch
       adenied ->
 	  route_error(Packet, forbidden,
-		      <<"Access denied by service policy">>);
+		      ?T("Access denied by service policy"));
       eadsele ->
 	  route_error(Packet, bad_request,
-		      <<"No addresses element found">>);
+		      ?T("No addresses element found"));
       eadeles ->
 	  route_error(Packet, bad_request,
-		      <<"No address elements found">>);
+		      ?T("No address elements found"));
       ewxmlns ->
 	  route_error(Packet, bad_request,
-		      <<"Wrong xmlns">>);
+		      ?T("Wrong xmlns"));
       etoorec ->
 	  route_error(Packet, not_acceptable,
-		      <<"Too many receiver fields were specified">>);
+		      ?T("Too many receiver fields were specified"));
       edrelay ->
 	  route_error(Packet, forbidden,
-		      <<"Packet relay is denied by service policy">>);
+		      ?T("Packet relay is denied by service policy"));
       EType:EReason ->
 	  ?ERROR_MSG("Multicast unknown error: Type: ~p~nReason: ~p",
 		     [EType, EReason]),
 	  route_error(Packet, internal_server_error,
-		      <<"Unknown problem">>)
+		      ?T("Internal server error"))
     end.
 
 -spec route_untrusted2(binary(), binary(), atom(), #service_limits{}, stanza()) -> 'ok'.
@@ -459,8 +466,9 @@ check_limit_dests(SLimits, FromJID, Packet,
 -spec convert_dest_record([address()]) -> [#dest{}].
 convert_dest_record(Addrs) ->
     lists:map(
-      fun(#address{jid = undefined} = Addr) ->
-	      #dest{jid_string = none, address = Addr};
+      fun(#address{jid = undefined, type = Type} = Addr) ->
+	      #dest{jid_string = none,
+		    type = Type, address = Addr};
 	 (#address{jid = JID, type = Type} = Addr) ->
 	      #dest{jid_string = jid:encode(JID), jid_jid = JID,
 		    type = Type, address = Addr}
@@ -485,9 +493,9 @@ split_dests_jid(Dests) ->
 report_not_jid(From, Packet, Dests) ->
     Dests2 = [fxml:element_to_binary(xmpp:encode(Dest#dest.address))
 	      || Dest <- Dests],
-    [route_error(xmpp:set_from_to(Packet, From, From), jid_malformed,
-		 <<"This service can not process the address: ",
-		   D/binary>>)
+    [route_error(
+       xmpp:set_from_to(Packet, From, From), jid_malformed,
+       str:format(?T("This service can not process the address: ~s"), [D]))
      || D <- Dests2].
 
 %%%-------------------------
@@ -502,7 +510,8 @@ group_dests(Dests) ->
 		    end,
 		    dict:new(), Dests),
     Keys = dict:fetch_keys(D),
-    [#group{server = Key, dests = dict:fetch(Key, D)}
+    [#group{server = Key, dests = dict:fetch(Key, D),
+	    addresses = [], others = []}
      || Key <- Keys].
 
 %%%-------------------------
@@ -1068,13 +1077,13 @@ iq_disco_info_extras(From, State) ->
     case iq_disco_info_extras2(SenderT, Service_limits) of
       [] -> [];
       List_limits_xmpp ->
-	    #xdata{type = result,
+	    [#xdata{type = result,
 		   fields = [?RFIELDT(hidden, <<"FORM_TYPE">>, ?NS_ADDRESS)
-			     | List_limits_xmpp]}
+			     | List_limits_xmpp]}]
     end.
 
 sender_type(From) ->
-    Local_hosts = ejabberd_config:get_myhosts(),
+    Local_hosts = ejabberd_option:hosts(),
     case lists:member(From#jid.lserver, Local_hosts) of
       true -> local;
       false -> remote
@@ -1124,23 +1133,109 @@ depends(_Host, _Opts) ->
     [].
 
 mod_opt_type(access) ->
-    fun acl:access_rules_validator/1;
-mod_opt_type(host) -> fun ejabberd_config:v_host/1;
-mod_opt_type(hosts) -> fun ejabberd_config:v_hosts/1;
-mod_opt_type(name) -> fun iolist_to_binary/1;
-mod_opt_type({limits, Type}) when (Type == local) or (Type == remote) ->
-    fun(L) ->
-	    lists:map(
-		fun ({message, infinite} = O) -> O;
-		    ({presence, infinite} = O) -> O;
-		    ({message, I} = O) when is_integer(I) -> O;
-		    ({presence, I} = O) when is_integer(I) -> O
-		end, L)
-    end.
+    econf:acl();
+mod_opt_type(name) ->
+    econf:binary();
+mod_opt_type(limits) ->
+    econf:options(
+      #{local =>
+	    econf:options(
+	      #{message => econf:non_neg_int(infinite),
+		presence => econf:non_neg_int(infinite)}),
+	remote =>
+	    econf:options(
+	      #{message => econf:non_neg_int(infinite),
+		presence => econf:non_neg_int(infinite)})});
+mod_opt_type(host) ->
+    econf:host();
+mod_opt_type(hosts) ->
+    econf:hosts();
+mod_opt_type(vcard) ->
+    econf:vcard_temp().
 
-mod_options(_Host) ->
+mod_options(Host) ->
     [{access, all},
-     {host, <<"multicast.@HOST@">>},
+     {host, <<"multicast.", Host/binary>>},
      {hosts, []},
      {limits, [{local, []}, {remote, []}]},
+     {vcard, undefined},
      {name, ?T("Multicast")}].
+
+mod_doc() ->
+    #{desc =>
+	  [?T("This module implements a service for "
+	      "https://xmpp.org/extensions/xep-0033.html"
+	      "[XEP-0033: Extended Stanza Addressing].")],
+      opts =>
+          [{access,
+            #{value => "Access",
+              desc =>
+                  ?T("The access rule to restrict who can send packets to "
+		     "the multicast service. Default value: 'all'.")}},
+           {host,
+            #{desc => ?T("Deprecated. Use 'hosts' instead.")}},
+           {hosts,
+            #{value => ?T("[Host, ...]"),
+              desc =>
+                  [?T("This option defines the Jabber IDs of the service. "
+		      "If the 'hosts' option is not specified, the only "
+		      "Jabber ID will be the hostname of the virtual host "
+		      "with the prefix \"multicast.\". The keyword '@HOST@' "
+		      "is replaced with the real virtual host name."),
+		   ?T("The default value is 'multicast.@HOST@'.")]}},
+	   {limits,
+	    #{value => "Sender: Stanza: Number",
+	      desc =>
+		  [?T("Specify a list of custom limits which override the "
+		      "default ones defined in XEP-0033. Limits are defined "
+		      "per sender type and stanza type, where:"), "",
+		   ?T("- 'sender' can be: 'local' or 'remote'."),
+		   ?T("- 'stanza' can be: 'message' or 'presence'."),
+		   ?T("- 'number' can be a positive integer or 'infinite'.")],
+              example =>
+                    ["# Default values:",
+                     "local:",
+		     "  message: 100",
+		     "  presence: 100",
+		     "remote:",
+		     "  message: 20",
+		     "  presence: 20"]
+		  }},
+           {name,
+            #{desc => ?T("Service name to provide in the Info query to the "
+			 "Service Discovery. Default is '\"Multicast\"'.")}},
+           {vcard,
+            #{desc => ?T("vCard element to return when queried. "
+			 "Default value is 'undefined'.")}}],
+      example =>
+          ["# Only admins can send packets to multicast service",
+	   "access_rules:",
+	   "  multicast:",
+	   "    - allow: admin",
+	   "",
+	   "# If you want to allow all your users:",
+	   "access_rules:",
+	   "  multicast:",
+	   "    - allow",
+	   "",
+	   "# This allows both admins and remote users to send packets,",
+	   "# but does not allow local users",
+	   "acl:",
+	   "  allservers:",
+	   "    server_glob: \"*\"",
+	   "access_rules:",
+	   "  multicast:",
+	   "    - allow: admin",
+	   "    - deny: local",
+	   "    - allow: allservers",
+	   "",
+	   "modules:",
+	   "  mod_multicast:",
+	   "     host: multicast.example.org",
+	   "     access: multicast",
+	   "     limits:",
+	   "       local:",
+	   "         message: 40",
+	   "         presence: infinite",
+	   "       remote:",
+	   "         message: 150"]}.

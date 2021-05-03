@@ -4,7 +4,7 @@
 %%% Created : 14 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,7 +24,6 @@
 
 -module(mod_shared_roster_sql).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -behaviour(mod_shared_roster).
 
@@ -36,7 +35,7 @@
 	 add_user_to_group/3, remove_user_from_group/3, import/3,
 	 export/1]).
 
--include("jid.hrl").
+-include_lib("xmpp/include/jid.hrl").
 -include("mod_roster.hrl").
 -include("mod_shared_roster.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -95,7 +94,7 @@ get_group_opts(Host, Group) ->
 		 ?SQL("select @(opts)s from sr_group"
                       " where name=%(Group)s and %(Host)H")) of
 	{selected, [{SOpts}]} ->
-	    mod_shared_roster:opts_to_binary(ejabberd_sql:decode_term(SOpts));
+            {ok, mod_shared_roster:opts_to_binary(ejabberd_sql:decode_term(SOpts))};
 	_ -> error
     end.
 

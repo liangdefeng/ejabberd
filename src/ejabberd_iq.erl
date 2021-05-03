@@ -1,11 +1,11 @@
 %%%-------------------------------------------------------------------
 %%% File    : ejabberd_iq.erl
 %%% Author  : Evgeny Khramtsov <ekhramtsov@process-one.net>
-%%% Purpose : 
+%%% Purpose :
 %%% Created : 10 Nov 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -34,8 +34,9 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("logger.hrl").
+-include("ejabberd_stacktrace.hrl").
 
 -record(state, {expire = infinity :: timeout()}).
 -type state() :: #state{}.
@@ -70,17 +71,18 @@ dispatch(_) ->
 %%% gen_server callbacks
 %%%===================================================================
 init([]) ->
-    ets:new(?MODULE, [named_table, ordered_set, public]),
+    _ = ets:new(?MODULE, [named_table, ordered_set, public]),
     {ok, #state{}}.
 
 handle_call(Request, From, State) ->
-    {stop, {unexpected_call, Request, From}, State}.
+    ?WARNING_MSG("Unexpected call from ~p: ~p", [From, Request]),
+    noreply(State).
 
 handle_cast({restart_timer, Expire}, State) ->
     State1 = State#state{expire = min(Expire, State#state.expire)},
     noreply(State1);
 handle_cast(Msg, State) ->
-    ?WARNING_MSG("unexpected cast: ~p", [Msg]),
+    ?WARNING_MSG("Unexpected cast: ~p", [Msg]),
     noreply(State).
 
 handle_info({route, IQ, Key}, State) ->
@@ -96,7 +98,7 @@ handle_info(timeout, State) ->
     Expire = clean(ets:first(?MODULE)),
     noreply(State#state{expire = Expire});
 handle_info(Info, State) ->
-    ?WARNING_MSG("unexpected info: ~p", [Info]),
+    ?WARNING_MSG("Unexpected info: ~p", [Info]),
     noreply(State).
 
 terminate(_Reason, _State) ->
@@ -166,12 +168,18 @@ decode_id(_) ->
 
 -spec calc_checksum(binary()) -> binary().
 calc_checksum(Data) ->
-    Key = ejabberd_config:get_option(shared_key),
+    Key = ejabberd_config:get_shared_key(),
     base64:encode(crypto:hash(sha, <<Data/binary, Key/binary>>)).
 
 -spec callback(atom() | pid(), #iq{} | timeout, term()) -> any().
 callback(undefined, IQRes, Fun) ->
-    Fun(IQRes);
+    try Fun(IQRes)
+    catch ?EX_RULE(Class, Reason, St) ->
+	    StackTrace = ?EX_STACK(St),
+	    ?ERROR_MSG("Failed to process iq response:~n~ts~n** ~ts",
+		       [xmpp:pp(IQRes),
+			misc:format_exception(2, Class, Reason, StackTrace)])
+    end;
 callback(Proc, IQRes, Ctx) ->
     try
         Proc ! {iq_reply, IQRes, Ctx}

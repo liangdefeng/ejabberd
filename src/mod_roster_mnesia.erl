@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -37,7 +37,7 @@
 
 -include("mod_roster.hrl").
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 
 %%%===================================================================
 %%% API
@@ -55,7 +55,7 @@ init(_Host, _Opts) ->
 use_cache(Host, Table) ->
     case mnesia:table_info(Table, storage_type) of
 	disc_only_copies ->
-	    gen_mod:get_module_opt(Host, mod_roster, use_cache);
+	    mod_roster_opt:use_cache(Host);
 	_ ->
 	    false
     end.
@@ -122,10 +122,11 @@ import(LServer, <<"roster_version">>, [LUser, Ver]) ->
     RV = #roster_version{us = {LUser, LServer}, version = Ver},
     mnesia:dirty_write(RV).
 
-need_transform(#roster{usj = {U, S, _}}) when is_list(U) orelse is_list(S) ->
+need_transform({roster, {U, S, _}, _, _, _, _, _, _, _, _})
+  when is_list(U) orelse is_list(S) ->
     ?INFO_MSG("Mnesia table 'roster' will be converted to binary", []),
     true;
-need_transform(#roster_version{us = {U, S}, version = Ver})
+need_transform({roster_version, {U, S}, Ver})
   when is_list(U) orelse is_list(S) orelse is_list(Ver) ->
     ?INFO_MSG("Mnesia table 'roster_version' will be converted to binary", []),
     true;
@@ -222,7 +223,7 @@ apply_action(list, Key) ->
     {RUser, RServer, _} = JID,
     Jid1string = <<User/binary, "@", Server/binary>>,
     Jid2string = <<RUser/binary, "@", RServer/binary>>,
-    io:format("Matches: ~s ~s~n", [Jid1string, Jid2string]),
+    io:format("Matches: ~ts ~ts~n", [Jid1string, Jid2string]),
     {Jid1string, Jid2string};
 apply_action(delete, Key) ->
     R = apply_action(list, Key),

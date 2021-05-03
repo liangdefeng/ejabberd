@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -23,14 +23,13 @@
 %%%----------------------------------------------------------------------
 
 -module(mod_private_sql).
--compile([{parse_transform, ejabberd_sql_pt}]).
 -behaviour(mod_private).
 
 %% API
 -export([init/2, set_data/3, get_data/3, get_all_data/2, del_data/2,
 	 import/3, export/1]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_private.hrl").
 -include("ejabberd_sql_pt.hrl").
 -include("logger.hrl").
@@ -134,8 +133,8 @@ parse_element(LUser, LServer, XML) ->
 	El when is_record(El, xmlel) ->
 	    {ok, El};
 	_ ->
-	    ?ERROR_MSG("malformed XML element in SQL table "
-		       "'private_storage' for user ~s@~s: ~s",
+	    ?ERROR_MSG("Malformed XML element in SQL table "
+		       "'private_storage' for user ~ts@~ts: ~ts",
 		       [LUser, LServer, XML]),
 	    error
     end.

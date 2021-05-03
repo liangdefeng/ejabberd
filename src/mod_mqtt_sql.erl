@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
 %%% @author Evgeny Khramtsov <ekhramtsov@process-one.net>
-%%% @copyright (C) 2002-2019 ProcessOne, SARL. All Rights Reserved.
+%%% @copyright (C) 2002-2021 ProcessOne, SARL. All Rights Reserved.
 %%%
 %%% Licensed under the Apache License, Version 2.0 (the "License");
 %%% you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@
 %%%-------------------------------------------------------------------
 -module(mod_mqtt_sql).
 -behaviour(mod_mqtt).
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 %% API
 -export([init/2, publish/6, delete_published/2, lookup_published/2]).
@@ -25,7 +24,7 @@
 %% Unsupported backend API
 -export([init/0]).
 -export([subscribe/4, unsubscribe/2, find_subscriber/2]).
--export([open_session/1, close_session/1, lookup_session/1]).
+-export([open_session/1, close_session/1, lookup_session/1, get_sessions/2]).
 
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -93,12 +92,12 @@ lookup_published({_, LServer, _}, Topic) ->
                             {ok, {Payload, QoS, Props, Expiry}}
                     catch _:badarg ->
                             ?ERROR_MSG("Malformed value of 'payload_format' column "
-                                       "for topic '~s'", [Topic]),
+                                       "for topic '~ts'", [Topic]),
                             {error, db_failure}
                     end
             catch _:badarg ->
                     ?ERROR_MSG("Malformed value of 'user_properties' column "
-                               "for topic '~s'", [Topic]),
+                               "for topic '~ts'", [Topic]),
                     {error, db_failure}
             end;
 	{selected, []} ->
@@ -124,6 +123,9 @@ close_session(_) ->
     erlang:nif_error(unsupported_db).
 
 lookup_session(_) ->
+    erlang:nif_error(unsupported_db).
+
+get_sessions(_, _) ->
     erlang:nif_error(unsupported_db).
 
 subscribe(_, _, _, _) ->

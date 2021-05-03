@@ -1,9 +1,14 @@
 ---
 name: Feature request
 about: Suggest an idea for this project
-labels: 
+title: ''
+labels: Kind:Feature
+assignees: ''
 
 ---
+
+Before creating a ticket, please consider if this should fit the discussion forum better:
+https://github.com/processone/ejabberd/discussions
 
 **Is your feature request related to a problem? Please describe.**
 A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]

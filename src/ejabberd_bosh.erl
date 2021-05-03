@@ -5,7 +5,7 @@
 %%% Created : 20 Jul 2011 by Evgeniy Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -43,7 +43,7 @@
 	 code_change/4]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("ejabberd_http.hrl").
 -include("bosh.hrl").
 
@@ -91,8 +91,8 @@
 	 xmpp_ver = <<"">>                        :: binary(),
          inactivity_timer                         :: reference() | undefined,
          wait_timer                               :: reference() | undefined,
-	 wait_timeout = ?DEFAULT_WAIT             :: timeout(),
-         inactivity_timeout                       :: timeout(),
+	 wait_timeout = ?DEFAULT_WAIT             :: pos_integer(),
+         inactivity_timeout                       :: pos_integer(),
 	 prev_rid = 0                             :: non_neg_integer(),
          prev_key = <<"">>                        :: binary(),
          prev_poll                                :: erlang:timestamp() | undefined,
@@ -274,8 +274,7 @@ init([#body{attrs = Attrs}, IP, SID]) ->
     Socket = make_socket(self(), IP),
     XMPPVer = get_attr('xmpp:version', Attrs),
     XMPPDomain = get_attr(to, Attrs),
-    {InBuf, Opts} = case gen_mod:get_module_opt(
-                           XMPPDomain, mod_bosh, prebind) of
+    {InBuf, Opts} = case mod_bosh_opt:prebind(XMPPDomain) of
                         true ->
                             JID = make_random_jid(XMPPDomain),
                             {buf_new(XMPPDomain), [{jid, JID} | Opts2]};
@@ -287,9 +286,8 @@ init([#body{attrs = Attrs}, IP, SID]) ->
     case ejabberd_c2s:start(?MODULE, Socket, [{receiver, self()}|Opts]) of
 	{ok, C2SPid} ->
 	    ejabberd_c2s:accept(C2SPid),
-	    Inactivity = gen_mod:get_module_opt(XMPPDomain,
-						mod_bosh, max_inactivity),
-	    MaxConcat = gen_mod:get_module_opt(XMPPDomain, mod_bosh, max_concat),
+	    Inactivity = mod_bosh_opt:max_inactivity(XMPPDomain) div 1000,
+	    MaxConcat = mod_bosh_opt:max_concat(XMPPDomain),
 	    ShapedReceivers = buf_new(XMPPDomain, ?MAX_SHAPED_REQUESTS_QUEUE_LEN),
 	    State = #state{host = XMPPDomain, sid = SID, ip = IP,
 			   xmpp_ver = XMPPVer, el_ibuf = InBuf,
@@ -298,8 +296,12 @@ init([#body{attrs = Attrs}, IP, SID]) ->
 			   shaped_receivers = ShapedReceivers,
 			   shaper_state = ShaperState},
 	    NewState = restart_inactivity_timer(State),
-	    mod_bosh:open_session(SID, self()),
-	    {ok, wait_for_session, NewState};
+	    case mod_bosh:open_session(SID, self()) of
+		ok ->
+		    {ok, wait_for_session, NewState};
+		{error, Reason} ->
+		    {stop, Reason}
+	    end;
 	{error, Reason} ->
 	    {stop, Reason};
 	ignore ->
@@ -307,14 +309,14 @@ init([#body{attrs = Attrs}, IP, SID]) ->
     end.
 
 wait_for_session(_Event, State) ->
-    ?ERROR_MSG("unexpected event in 'wait_for_session': ~p",
+    ?ERROR_MSG("Unexpected event in 'wait_for_session': ~p",
 	       [_Event]),
     {next_state, wait_for_session, State}.
 
 wait_for_session(#body{attrs = Attrs} = Req, From,
 		 State) ->
     RID = get_attr(rid, Attrs),
-    ?DEBUG("got request:~n** RequestID: ~p~n** Request: "
+    ?DEBUG("Got request:~n** RequestID: ~p~n** Request: "
 	   "~p~n** From: ~p~n** State: ~p",
 	   [RID, Req, From, State]),
     Wait = min(get_attr(wait, Attrs, undefined),
@@ -328,8 +330,7 @@ wait_for_session(#body{attrs = Attrs} = Req, From,
 		   Wait == 0, Hold == 0 -> erlang:timestamp();
 		   true -> undefined
 	       end,
-    MaxPause = gen_mod:get_module_opt(State#state.host,
-				      mod_bosh, max_pause),
+    MaxPause = mod_bosh_opt:max_pause(State#state.host) div 1000,
     Resp = #body{attrs =
 		     [{sid, State#state.sid}, {wait, Wait},
 		      {ver, ?BOSH_VERSION}, {polling, ?DEFAULT_POLLING},
@@ -367,20 +368,20 @@ wait_for_session(#body{attrs = Attrs} = Req, From,
 			     From)
     end;
 wait_for_session(_Event, _From, State) ->
-    ?ERROR_MSG("unexpected sync event in 'wait_for_session': ~p",
+    ?ERROR_MSG("Unexpected sync event in 'wait_for_session': ~p",
 	       [_Event]),
     {reply, {error, badarg}, wait_for_session, State}.
 
 active({#body{} = Body, From}, State) ->
     active1(Body, From, State);
 active(_Event, State) ->
-    ?ERROR_MSG("unexpected event in 'active': ~p",
+    ?ERROR_MSG("Unexpected event in 'active': ~p",
 	       [_Event]),
     {next_state, active, State}.
 
 active(#body{attrs = Attrs, size = Size} = Req, From,
        State) ->
-    ?DEBUG("got request:~n** Request: ~p~n** From: "
+    ?DEBUG("Got request:~n** Request: ~p~n** From: "
 	   "~p~n** State: ~p",
 	   [Req, From, State]),
     {ShaperState, Pause} =
@@ -408,7 +409,7 @@ active(#body{attrs = Attrs, size = Size} = Req, From,
        true -> active1(Req, From, State1)
     end;
 active(_Event, _From, State) ->
-    ?ERROR_MSG("unexpected sync event in 'active': ~p",
+    ?ERROR_MSG("Unexpected sync event in 'active': ~p",
 	       [_Event]),
     {reply, {error, badarg}, active, State}.
 
@@ -517,7 +518,7 @@ handle_event({change_shaper, Shaper}, StateName,
 	     State) ->
     {next_state, StateName, State#state{shaper_state = Shaper}};
 handle_event(_Event, StateName, State) ->
-    ?ERROR_MSG("unexpected event in '~s': ~p",
+    ?ERROR_MSG("Unexpected event in '~ts': ~p",
 	       [StateName, _Event]),
     {next_state, StateName, State}.
 
@@ -557,7 +558,7 @@ handle_sync_event(deactivate_socket, _From, StateName,
     {reply, ok, StateName,
      StateData#state{c2s_pid = undefined}};
 handle_sync_event(_Event, _From, StateName, State) ->
-    ?ERROR_MSG("unexpected sync event in '~s': ~p",
+    ?ERROR_MSG("Unexpected sync event in '~ts': ~p",
 	       [StateName, _Event]),
     {reply, {error, badarg}, StateName, State}.
 
@@ -583,7 +584,7 @@ handle_info({timeout, TRef, shaper_timeout}, StateName,
       _ -> {next_state, StateName, State}
     end;
 handle_info(_Info, StateName, State) ->
-    ?ERROR_MSG("unexpected info:~n** Msg: ~p~n** StateName: ~p",
+    ?ERROR_MSG("Unexpected info:~n** Msg: ~p~n** StateName: ~p",
 	       [_Info, StateName]),
     {next_state, StateName, State}.
 
@@ -675,7 +676,7 @@ drop_holding_receiver(State, RID) ->
     end.
 
 do_reply(State, From, Body, RID) ->
-    ?DEBUG("send reply:~n** RequestID: ~p~n** Reply: "
+    ?DEBUG("Send reply:~n** RequestID: ~p~n** Reply: "
 	   "~p~n** To: ~p~n** State: ~p",
 	   [RID, Body, From, State]),
     p1_fsm:reply(From, Body),
@@ -709,7 +710,7 @@ bounce_receivers(State, _Reason) ->
 		State, Receivers ++ ShapedReceivers).
 
 bounce_els_from_obuf(State) ->
-    Opts = ejabberd_config:codec_options(State#state.host),
+    Opts = ejabberd_config:codec_options(),
     p1_queue:foreach(
       fun({xmlstreamelement, El}) ->
 	      try xmpp:decode(El, ?NS_CLIENT, Opts) of
@@ -887,7 +888,9 @@ decode_body(Data, Size, Type) ->
     end.
 
 decode(Data, xml) ->
-    fxml_stream:parse_element(Data).
+    fxml_stream:parse_element(Data);
+decode(Data, json) ->
+    Data.
 
 attrs_to_body_attrs(Attrs) ->
     lists:foldl(fun (_, {error, Reason}) -> {error, Reason};
@@ -946,7 +949,7 @@ bosh_response(Body, Type) ->
      encode_body(Body, Type)}.
 
 bosh_response_with_msg(Body, Type, RcvBody) ->
-    ?DEBUG("send error reply:~p~n** Receiced body: ~p",
+    ?DEBUG("Send error reply:~p~n** Receiced body: ~p",
 	   [Body, RcvBody]),
     bosh_response(Body, Type).
 
@@ -991,8 +994,7 @@ buf_new(Host) ->
     buf_new(Host, unlimited).
 
 buf_new(Host, Limit) ->
-    QueueType = gen_mod:get_module_opt(
-		  Host, mod_bosh, queue_type),
+    QueueType = mod_bosh_opt:queue_type(Host),
     p1_queue:new(QueueType, Limit).
 
 buf_in(Xs, Buf) ->

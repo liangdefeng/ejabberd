@@ -5,7 +5,7 @@
 %%% Created : 20 Jan 2016 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -28,9 +28,7 @@
 %% API
 -export([parse_transform/2, format_error/1]).
 
-%-export([parse/2]).
-
--include("ejabberd_sql_pt.hrl").
+-include("ejabberd_sql.hrl").
 
 -record(state, {loc,
                 'query' = [],
@@ -66,10 +64,8 @@
 %% Description:
 %%--------------------------------------------------------------------
 parse_transform(AST, _Options) ->
-    %io:format("PT: ~p~nOpts: ~p~n", [AST, Options]),
     put(warnings, []),
     NewAST = top_transform(AST),
-    %io:format("NewPT: ~p~n", [NewAST]),
     NewAST ++ get(warnings).
 
 
@@ -141,7 +137,6 @@ transform(Form) ->
                     case erl_syntax:attribute_arguments(Form) of
                         [M | _] ->
                             Module = erl_syntax:atom_value(M),
-                            %io:format("module ~p~n", [Module]),
                             put(?MOD, Module),
                             Form;
                         _ ->
@@ -158,11 +153,7 @@ top_transform(Forms) when is_list(Forms) ->
     lists:map(
       fun(Form) ->
               try
-                  Form2 = erl_syntax_lib:map(
-                            fun(Node) ->
-                                                %io:format("asd ~p~n", [Node]),
-                                    transform(Node)
-                            end, Form),
+                  Form2 = erl_syntax_lib:map(fun transform/1, Form),
                   Form3 = erl_syntax:revert(Form2),
                   Form3
 	      catch
@@ -363,6 +354,22 @@ parse1([$%, $( | S], Acc, State) ->
                              used_vars = [Name | State2#state.used_vars]}
         end,
     parse1(S1, [], State4);
+parse1("%ESCAPE" ++ S, Acc, State) ->
+    State1 = append_string(lists:reverse(Acc), State),
+    Convert =
+        erl_syntax:application(
+          erl_syntax:record_access(
+            erl_syntax:variable(?ESCAPE_VAR),
+            erl_syntax:atom(?ESCAPE_RECORD),
+            erl_syntax:atom(like_escape)),
+          []),
+    Var = State1#state.param_pos,
+    State2 =
+        State1#state{'query' = [{var, Var} | State1#state.'query'],
+                     args = [Convert | State1#state.args],
+                     params = [Var | State1#state.params],
+                     param_pos = State1#state.param_pos + 1},
+    parse1(S, [], State2);
 parse1([C | S], Acc, State) ->
     parse1(S, [C | Acc], State).
 
@@ -517,7 +524,6 @@ parse_upsert(Fields) ->
                                  "a constant string"})
                   end
           end, {[], 0}, Fields),
-    %io:format("upsert ~p~n", [{Fields, Fs}]),
     Fs.
 
 %% key | {Update}
@@ -543,20 +549,35 @@ parse_upsert_field1([C | S], Acc, ParamPos, Loc) ->
 
 make_sql_upsert(Table, ParseRes, Pos) ->
     check_upsert(ParseRes, Pos),
+    HasInsertOnlyFields = lists:any(
+        fun({_, {false}, _}) -> true;
+           (_) -> false
+        end, ParseRes),
+    MySqlReplace = case HasInsertOnlyFields of
+                       false ->
+                           [erl_syntax:clause(
+                               [erl_syntax:atom(mysql), erl_syntax:underscore()],
+                               [],
+                               [make_sql_upsert_mysql(Table, ParseRes),
+                                erl_syntax:atom(ok)])];
+                       _ ->
+                           []
+                   end,
     erl_syntax:fun_expr(
-      [erl_syntax:clause(
-         [erl_syntax:atom(pgsql), erl_syntax:variable("__Version")],
-         [erl_syntax:infix_expr(
-            erl_syntax:variable("__Version"),
-            erl_syntax:operator('>='),
-            erl_syntax:integer(90100))],
-         [make_sql_upsert_pgsql901(Table, ParseRes),
-          erl_syntax:atom(ok)]),
-       erl_syntax:clause(
-         [erl_syntax:underscore(), erl_syntax:underscore()],
-         none,
-         [make_sql_upsert_generic(Table, ParseRes)])
-      ]).
+        [erl_syntax:clause(
+            [erl_syntax:atom(pgsql), erl_syntax:variable("__Version")],
+            [erl_syntax:infix_expr(
+                erl_syntax:variable("__Version"),
+                erl_syntax:operator('>='),
+                erl_syntax:integer(90100))],
+            [make_sql_upsert_pgsql901(Table, ParseRes),
+             erl_syntax:atom(ok)])] ++
+            MySqlReplace ++
+            [erl_syntax:clause(
+                [erl_syntax:underscore(), erl_syntax:underscore()],
+                none,
+                [make_sql_upsert_generic(Table, ParseRes)])
+            ]).
 
 make_sql_upsert_generic(Table, ParseRes) ->
     Update = make_sql_query(make_sql_upsert_update(Table, ParseRes)),
@@ -622,6 +643,9 @@ make_sql_upsert_update(Table, ParseRes) ->
     State.
 
 make_sql_upsert_insert(Table, ParseRes) ->
+    make_sql_upsert_insert_replace(Table, ParseRes, "INSERT").
+
+make_sql_upsert_insert_replace(Table, ParseRes, Keyword) ->
     Vals =
         lists:map(
           fun({_Field, _, ST}) ->
@@ -634,7 +658,7 @@ make_sql_upsert_insert(Table, ParseRes) ->
           end, ParseRes),
     State =
         concat_states(
-          [#state{'query' = [{str, "INSERT INTO "}, {str, Table}, {str, "("}]},
+          [#state{'query' = [{str, Keyword ++" INTO "}, {str, Table}, {str, "("}]},
            join_states(Fields, ", "),
            #state{'query' = [{str, ") VALUES ("}]},
            join_states(Vals, ", "),
@@ -642,7 +666,21 @@ make_sql_upsert_insert(Table, ParseRes) ->
           ]),
     State.
 
-make_sql_upsert_pgsql901(Table, ParseRes) ->
+make_sql_upsert_replace(Table, ParseRes) ->
+    make_sql_upsert_insert_replace(Table, ParseRes, "REPLACE").
+
+make_sql_upsert_mysql(Table, ParseRes) ->
+    Replace = make_sql_query(make_sql_upsert_replace(Table, ParseRes)),
+    erl_syntax:application(
+        erl_syntax:atom(ejabberd_sql),
+        erl_syntax:atom(sql_query_t),
+        [Replace]).
+
+make_sql_upsert_pgsql901(Table, ParseRes0) ->
+    ParseRes = lists:map(
+        fun({"family", A2, A3}) -> {"\"family\"", A2, A3};
+           (Other) -> Other
+        end, ParseRes0),
     Update = make_sql_upsert_update(Table, ParseRes),
     Vals =
         lists:map(

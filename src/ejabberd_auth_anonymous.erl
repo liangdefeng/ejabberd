@@ -5,7 +5,7 @@
 %%% Created : 17 Feb 2006 by Mickael Remond <mremond@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -25,7 +25,6 @@
 
 -module(ejabberd_auth_anonymous).
 
--behaviour(ejabberd_config).
 -behaviour(ejabberd_auth).
 -author('mickael.remond@process-one.net').
 
@@ -43,10 +42,10 @@
 
 -export([login/2, check_password/4, user_exists/2,
 	 get_users/2, count_users/2, store_type/1,
-	 plain_password_required/1, opt_type/1]).
+	 plain_password_required/1]).
 
 -include("logger.hrl").
--include("jid.hrl").
+-include_lib("xmpp/include/jid.hrl").
 
 start(Host) ->
     ejabberd_hooks:add(sm_register_connection_hook, Host,
@@ -98,12 +97,12 @@ is_login_anonymous_enabled(Host) ->
 %% Return the anonymous protocol to use: sasl_anon|login_anon|both
 %% defaults to login_anon
 anonymous_protocol(Host) ->
-    ejabberd_config:get_option({anonymous_protocol, Host}, sasl_anon).
+    ejabberd_option:anonymous_protocol(Host).
 
 %% Return true if multiple connections have been allowed in the config file
 %% defaults to false
 allow_multiple_connections(Host) ->
-    ejabberd_config:get_option({allow_multiple_connections, Host}, false).
+    ejabberd_option:allow_multiple_connections(Host).
 
 anonymous_user_exist(User, Server) ->
     lists:any(
@@ -149,16 +148,14 @@ unregister_connection(_SID,
 %% Specific anonymous auth functions
 %% ---------------------------------
 check_password(User, _AuthzId, Server, _Password) ->
-    case
-      ejabberd_auth:user_exists_in_other_modules(?MODULE,
-						    User, Server)
-	of
-      %% If user exists in other module, reject anonnymous authentication
-      true -> false;
-      %% If we are not sure whether the user exists in other module, reject anon auth
-      maybe -> false;
-      false -> login(User, Server)
-    end.
+    {nocache,
+     case ejabberd_auth:user_exists_in_other_modules(?MODULE, User, Server) of
+	 %% If user exists in other module, reject anonnymous authentication
+	 true -> false;
+	 %% If we are not sure whether the user exists in other module, reject anon auth
+	 maybe -> false;
+	 false -> login(User, Server)
+     end}.
 
 login(User, Server) ->
     case is_login_anonymous_enabled(Server) of
@@ -181,21 +178,10 @@ count_users(Server, Opts) ->
     length(get_users(Server, Opts)).
 
 user_exists(User, Server) ->
-    anonymous_user_exist(User, Server).
+    {nocache, anonymous_user_exist(User, Server)}.
 
 plain_password_required(_) ->
     false.
 
 store_type(_) ->
     external.
-
--spec opt_type(atom()) -> fun((any()) -> any()) | [atom()].
-opt_type(allow_multiple_connections) ->
-    fun (V) when is_boolean(V) -> V end;
-opt_type(anonymous_protocol) ->
-    fun (sasl_anon) -> sasl_anon;
-	(login_anon) -> login_anon;
-	(both) -> both
-    end;
-opt_type(_) ->
-    [allow_multiple_connections, anonymous_protocol].

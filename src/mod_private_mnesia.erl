@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -31,7 +31,7 @@
 	 use_cache/1, import/3]).
 -export([need_transform/1, transform/1]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_private.hrl").
 -include("logger.hrl").
 
@@ -46,7 +46,7 @@ init(_Host, _Opts) ->
 use_cache(Host) ->
     case mnesia:table_info(private_storage, storage_type) of
 	disc_only_copies ->
-	    gen_mod:get_module_opt(Host, mod_private, use_cache);
+	    mod_private_opt:use_cache(Host);
 	_ ->
 	    false
     end.
@@ -107,7 +107,7 @@ import(LServer, <<"private_storage">>,
     PS = #private_storage{usns = {LUser, LServer, XMLNS}, xml = El},
     mnesia:dirty_write(PS).
 
-need_transform(#private_storage{usns = {U, S, NS}})
+need_transform({private_storage, {U, S, NS}, _})
   when is_list(U) orelse is_list(S) orelse is_list(NS) ->
     ?INFO_MSG("Mnesia table 'private_storage' will be converted to binary", []),
     true;

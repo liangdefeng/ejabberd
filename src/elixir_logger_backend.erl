@@ -5,7 +5,7 @@
 %%% Created : 9 March 2016 by Mickael Remond <mremond@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -22,8 +22,9 @@
 %%% 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 %%%
 %%%-------------------------------------------------------------------
-
 -module(elixir_logger_backend).
+
+-ifdef(ELIXIR_ENABLED).
 
 -behaviour(gen_event).
 
@@ -57,7 +58,7 @@ handle_event({log, LagerMsg}, State) ->
             notify(Mode, {MsgLevel, GroupLeader, {'Elixir.Logger', Message, Timestamp, Metadata}}),
             {ok, State};
         _ ->
-            {ok, State}            
+            {ok, State}
     end;
 handle_event(_Msg, State) ->
     {ok, State}.
@@ -110,7 +111,7 @@ timestamp(Time, UTCLog) ->
             false -> calendar:now_to_local_time(Time)
         end,
     {Date, {Hours, Minutes, Seconds, Micro div 1000}}.
-    
+
 
 severity_to_level(debug) -> debug;
 severity_to_level(info) -> info;
@@ -120,3 +121,5 @@ severity_to_level(error) -> error;
 severity_to_level(critical) -> error;
 severity_to_level(alert) -> error;
 severity_to_level(emergency) -> error.
+
+-endif.

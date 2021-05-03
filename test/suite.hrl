@@ -1,8 +1,9 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("fast_xml/include/fxml.hrl").
--include("ns.hrl").
+-include_lib("xmpp/include/jid.hrl").
+-include_lib("xmpp/include/ns.hrl").
+-include_lib("xmpp/include/xmpp_codec.hrl").
 -include("mod_proxy65.hrl").
--include("xmpp_codec.hrl").
 
 -define(STREAM_TRAILER, <<"</stream:stream>">>).
 
@@ -92,13 +93,15 @@
 -define(MNESIA_VHOST, <<"mnesia.localhost">>).
 -define(REDIS_VHOST, <<"redis.localhost">>).
 -define(MYSQL_VHOST, <<"mysql.localhost">>).
+-define(MSSQL_VHOST, <<"mssql.localhost">>).
 -define(PGSQL_VHOST, <<"pgsql.localhost">>).
 -define(SQLITE_VHOST, <<"sqlite.localhost">>).
 -define(LDAP_VHOST, <<"ldap.localhost">>).
 -define(EXTAUTH_VHOST, <<"extauth.localhost">>).
--define(RIAK_VHOST, <<"riak.localhost">>).
 -define(S2S_VHOST, <<"s2s.localhost">>).
 -define(UPLOAD_VHOST, <<"upload.localhost">>).
+
+-define(BACKENDS, [mnesia, redis, mysql, mssql, odbc, pgsql, sqlite, ldap, extauth]).
 
 insert(Val, N, Tuple) ->
     L = tuple_to_list(Tuple),

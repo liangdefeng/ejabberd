@@ -1,5 +1,5 @@
 --
--- ejabberd, Copyright (C) 2002-2019   ProcessOne
+-- ejabberd, Copyright (C) 2002-2021   ProcessOne
 --
 -- This program is free software; you can redistribute it and/or
 -- modify it under the terms of the GNU General Public License as
@@ -354,6 +354,13 @@ CREATE TABLE oauth_token (
     expire bigint NOT NULL
 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+CREATE TABLE oauth_client (
+    client_id varchar(191) NOT NULL PRIMARY KEY,
+    client_name text NOT NULL,
+    grant_type text NOT NULL,
+    options text NOT NULL
+) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE route (
     domain text NOT NULL,
     server_host text NOT NULL,
@@ -391,7 +398,7 @@ CREATE TABLE push_session (
     service text NOT NULL,
     node text NOT NULL,
     xml text NOT NULL
-);
+) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE UNIQUE INDEX i_push_usn ON push_session (username(191), service(191), node(191));
 CREATE UNIQUE INDEX i_push_ut ON push_session (username(191), timestamp);
@@ -462,4 +469,4 @@ CREATE TABLE mqtt_pub (
     user_properties blob NOT NULL,
     expiry int unsigned NOT NULL,
     UNIQUE KEY i_mqtt_topic (topic(191))
-);
+) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

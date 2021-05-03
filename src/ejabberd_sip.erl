@@ -5,7 +5,7 @@
 %%% Created : 30 Apr 2017 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2013-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2013-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -30,7 +30,7 @@
 -include("logger.hrl").
 -export([accept/1, start/3, start_link/3, listen_options/0]).
 fail() ->
-    ?CRITICAL_MSG("Listening module ~s is not available: "
+    ?CRITICAL_MSG("Listening module ~ts is not available: "
 		  "ejabberd is not compiled with SIP support",
 		  [?MODULE]),
     erlang:error(sip_not_compiled).
@@ -45,8 +45,8 @@ start_link(_, _, _) ->
 -else.
 %% API
 -export([tcp_init/2, udp_init/2, udp_recv/5, start/3,
-	 start_link/3, accept/1, listen_options/0]).
-
+	 start_link/3, accept/1]).
+-export([listen_opt_type/1, listen_options/0]).
 
 %%%===================================================================
 %%% API
@@ -80,14 +80,12 @@ set_certfile(Opts) ->
 		{ok, CertFile} ->
 		    [{certfile, CertFile}|Opts];
 		error ->
-		    case ejabberd_config:get_option({domain_certfile, ejabberd_config:get_myname()}) of
-			undefined ->
-			    Opts;
-			CertFile ->
-			    [{certfile, CertFile}|Opts]
-		    end
+		    Opts
 	    end
     end.
+
+listen_opt_type(certfile) ->
+    econf:pem().
 
 listen_options() ->
     [{tls, false},

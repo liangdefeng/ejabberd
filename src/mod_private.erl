@@ -5,7 +5,7 @@
 %%% Created : 16 Jan 2003 by Alexey Shchepin <alexey@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -33,16 +33,17 @@
 -behaviour(gen_mod).
 
 -export([start/2, stop/1, reload/3, process_sm_iq/1, import_info/0,
-	 remove_user/2, get_data/2, get_data/3, export/1,
+	 remove_user/2, get_data/2, get_data/3, export/1, mod_doc/0,
 	 import/5, import_start/2, mod_opt_type/1, set_data/2,
 	 mod_options/1, depends/2, get_sm_features/5, pubsub_publish_item/6]).
 
 -export([get_commands_spec/0, bookmarks_to_pep/2]).
 
 -include("logger.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("mod_private.hrl").
 -include("ejabberd_commands.hrl").
+-include("translate.hrl").
 
 -define(PRIVATE_CACHE, private_cache).
 
@@ -58,7 +59,7 @@
 -optional_callbacks([use_cache/1, cache_nodes/1]).
 
 start(Host, Opts) ->
-    Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
+    Mod = gen_mod:db_mod(Opts, ?MODULE),
     Mod:init(Host, Opts),
     init_cache(Mod, Host, Opts),
     ejabberd_hooks:add(remove_user, Host, ?MODULE, remove_user, 50),
@@ -80,8 +81,8 @@ stop(Host) ->
     end.
 
 reload(Host, NewOpts, OldOpts) ->
-    NewMod = gen_mod:db_mod(Host, NewOpts, ?MODULE),
-    OldMod = gen_mod:db_mod(Host, OldOpts, ?MODULE),
+    NewMod = gen_mod:db_mod(NewOpts, ?MODULE),
+    OldMod = gen_mod:db_mod(OldOpts, ?MODULE),
     if NewMod /= OldMod ->
 	    NewMod:init(Host, NewOpts);
        true ->
@@ -92,20 +93,58 @@ reload(Host, NewOpts, OldOpts) ->
 depends(_Host, _Opts) ->
     [{mod_pubsub, soft}].
 
-mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun (I) when is_integer(I), I > 0 -> I;
-        (infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
+mod_opt_type(db_type) ->
+    econf:db_type(?MODULE);
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
 mod_options(Host) ->
     [{db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+     {use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
+
+mod_doc() ->
+    #{desc =>
+          [?T("This module adds support for "
+              "https://xmpp.org/extensions/xep-0049.html"
+              "[XEP-0049: Private XML Storage]."), "",
+           ?T("Using this method, XMPP entities can store "
+              "private data on the server, retrieve it "
+              "whenever necessary and share it between multiple "
+              "connected clients of the same user. The data stored "
+              "might be anything, as long as it is a valid XML. "
+              "One typical usage is storing a bookmark of all user's conferences "
+              "(https://xmpp.org/extensions/xep-0048.html"
+              "[XEP-0048: Bookmarks]).")],
+      opts =>
+          [{db_type,
+            #{value => "mnesia | sql",
+              desc =>
+                  ?T("Same as top-level 'default_db' option, but applied to this module only.")}},
+           {use_cache,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level 'use_cache' option, but applied to this module only.")}},
+           {cache_size,
+            #{value => "pos_integer() | infinity",
+              desc =>
+                  ?T("Same as top-level 'cache_size' option, but applied to this module only.")}},
+           {cache_missed,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level 'cache_missed' option, but applied to this module only.")}},
+           {cache_life_time,
+            #{value => "timeout()",
+              desc =>
+                  ?T("Same as top-level 'cache_life_time' option, but applied to this module only.")}}]}.
 
 -spec get_sm_features({error, stanza_error()} | empty | {result, [binary()]},
 		      jid(), jid(), binary(), binary()) ->
@@ -133,7 +172,7 @@ process_sm_iq(#iq{type = Type, lang = Lang,
 		  sub_els = [#private{sub_els = Els0}]} = IQ) ->
     case filter_xmlels(Els0) of
 	[] ->
-	    Txt = <<"No private data found in this query">>,
+	    Txt = ?T("No private data found in this query"),
 	    xmpp:make_error(IQ, xmpp:err_bad_request(Txt, Lang));
 	Data when Type == set ->
 	    case set_data(From, Data) of
@@ -142,14 +181,14 @@ process_sm_iq(#iq{type = Type, lang = Lang,
 		{error, #stanza_error{} = Err} ->
 		    xmpp:make_error(IQ, Err);
 		{error, _} ->
-		    Txt = <<"Database failure">>,
+		    Txt = ?T("Database failure"),
 		    Err = xmpp:err_internal_server_error(Txt, Lang),
 		    xmpp:make_error(IQ, Err)
 	    end;
 	Data when Type == get ->
 	    case get_data(LUser, LServer, Data) of
 		{error, _} ->
-		    Txt = <<"Database failure">>,
+		    Txt = ?T("Database failure"),
 		    Err = xmpp:err_internal_server_error(Txt, Lang),
 		    xmpp:make_error(IQ, Err);
 		Els ->
@@ -157,7 +196,7 @@ process_sm_iq(#iq{type = Type, lang = Lang,
 	    end
     end;
 process_sm_iq(#iq{lang = Lang} = IQ) ->
-    Txt = <<"Query to another users is forbidden">>,
+    Txt = ?T("Query to another users is forbidden"),
     xmpp:make_error(IQ, xmpp:err_forbidden(Txt, Lang)).
 
 -spec filter_xmlels([xmlel()]) -> [{binary(), xmlel()}].
@@ -282,7 +321,8 @@ get_commands_spec() ->
     [#ejabberd_commands{name = bookmarks_to_pep, tags = [private],
 			desc = "Export private XML storage bookmarks to PEP",
 			module = ?MODULE, function = bookmarks_to_pep,
-			args = [{user, binary}, {server, binary}],
+			args = [{user, binary}, {host, binary}],
+			args_rename = [{server, host}],
 			args_desc = ["Username", "Server"],
 			args_example = [<<"bob">>, <<"example.com">>],
 			result = {res, restuple},
@@ -348,19 +388,16 @@ init_cache(Mod, Host, Opts) ->
 
 -spec cache_opts(gen_mod:opts()) -> [proplists:property()].
 cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_private_opt:cache_size(Opts),
+    CacheMissed = mod_private_opt:cache_missed(Opts),
+    LifeTime = mod_private_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
 -spec use_cache(module(), binary()) -> boolean().
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false -> mod_private_opt:use_cache(Host)
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].

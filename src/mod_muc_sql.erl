@@ -4,7 +4,7 @@
 %%% Created : 13 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -24,7 +24,6 @@
 
 -module(mod_muc_sql).
 
--compile([{parse_transform, ejabberd_sql_pt}]).
 
 -behaviour(mod_muc).
 -behaviour(mod_muc_room).
@@ -37,11 +36,12 @@
 	 get_online_rooms/3, count_online_rooms/2, rsm_supported/0,
 	 register_online_user/4, unregister_online_user/4,
 	 count_online_rooms_by_user/3, get_online_rooms_by_user/3,
-	 get_subscribed_rooms/3]).
+	 get_subscribed_rooms/3, get_rooms_without_subscribers/2,
+	 find_online_room_by_pid/2]).
 -export([set_affiliation/6, set_affiliations/4, get_affiliation/5,
 	 get_affiliations/3, search_affiliation/4]).
 
--include("jid.hrl").
+-include_lib("xmpp/include/jid.hrl").
 -include("mod_muc.hrl").
 -include("logger.hrl").
 -include("ejabberd_sql_pt.hrl").
@@ -50,7 +50,7 @@
 %%% API
 %%%===================================================================
 init(Host, Opts) ->
-    case gen_mod:ram_db_mod(Host, Opts, mod_muc) of
+    case gen_mod:ram_db_mod(Opts, mod_muc) of
 	?MODULE ->
 	    clean_tables(Host);
 	_ ->
@@ -98,7 +98,7 @@ change_room(Host, Room, {del_subscription, JID}) ->
     ejabberd_sql:sql_query_t(?SQL("delete from muc_room_subscribers where "
 				  "room=%(Room)s and host=%(Host)s and jid=%(SJID)s"));
 change_room(Host, Room, Change) ->
-    ?ERROR_MSG("Unsupported change on room ~s@~s: ~p", [Room, Host, Change]).
+    ?ERROR_MSG("Unsupported change on room ~ts@~ts: ~p", [Room, Host, Change]).
 
 restore_room(LServer, Host, Name) ->
     case catch ejabberd_sql:sql_query(
@@ -154,6 +154,22 @@ can_use_nick(LServer, Host, JID, Nick) ->
                       " and host=%(Host)s")) of
 	{selected, [{SJID1}]} -> SJID == SJID1;
 	_ -> true
+    end.
+
+get_rooms_without_subscribers(LServer, Host) ->
+    case catch ejabberd_sql:sql_query(
+	LServer,
+	?SQL("select @(name)s, @(opts)s from muc_room"
+	     " where host=%(Host)s")) of
+	{selected, RoomOpts} ->
+	    lists:map(
+		fun({Room, Opts}) ->
+		    OptsD = ejabberd_sql:decode_term(Opts),
+		    #muc_room{name_host = {Room, Host},
+			      opts = mod_muc:opts_to_binary(OptsD)}
+		end, RoomOpts);
+	_Err ->
+	    []
     end.
 
 get_rooms(LServer, Host) ->
@@ -291,6 +307,21 @@ find_online_room(ServerHost, Room, Host) ->
 	    error
     end.
 
+find_online_room_by_pid(ServerHost, Pid) ->
+    PidS = misc:encode_pid(Pid),
+    NodeS = erlang:atom_to_binary(node(Pid), latin1),
+    case ejabberd_sql:sql_query(
+	ServerHost,
+	?SQL("select @(name)s, @(host)s from muc_online_room where "
+	     "node=%(NodeS)s and pid=%(PidS)s")) of
+	{selected, [{Room, Host}]} ->
+	    {ok, Room, Host};
+	{selected, []} ->
+	    error;
+	_Err ->
+	    error
+    end.
+
 count_online_rooms(ServerHost, Host) ->
     case ejabberd_sql:sql_query(
 	   ServerHost,
@@ -411,11 +442,11 @@ get_subscribed_rooms(LServer, Host, Jid) ->
     JidS = jid:encode(Jid),
     case ejabberd_sql:sql_query(
 	   LServer,
-	   ?SQL("select @(room)s, @(nodes)s from muc_room_subscribers "
+	   ?SQL("select @(room)s, @(nick)s, @(nodes)s from muc_room_subscribers "
 		"where jid=%(JidS)s and host=%(Host)s")) of
 	{selected, Subs} ->
-	    {ok, [{jid:make(Room, Host), ejabberd_sql:decode_term(Nodes)}
-		  || {Room, Nodes} <- Subs]};
+	    {ok, [{jid:make(Room, Host), Nick, ejabberd_sql:decode_term(Nodes)}
+		  || {Room, Nick, Nodes} <- Subs]};
 	_Error ->
 	    {error, db_failure}
     end.
@@ -432,7 +463,7 @@ clean_tables(ServerHost) ->
 	{updated, _} ->
 	    ok;
 	Err1 ->
-	    ?ERROR_MSG("failed to clean 'muc_online_room' table: ~p", [Err1]),
+	    ?ERROR_MSG("Failed to clean 'muc_online_room' table: ~p", [Err1]),
 	    Err1
     end,
     ?DEBUG("Cleaning SQL muc_online_users table...", []),
@@ -442,6 +473,6 @@ clean_tables(ServerHost) ->
 	{updated, _} ->
 	    ok;
 	Err2 ->
-	    ?ERROR_MSG("failed to clean 'muc_online_users' table: ~p", [Err2]),
+	    ?ERROR_MSG("Failed to clean 'muc_online_users' table: ~p", [Err2]),
 	    Err2
     end.

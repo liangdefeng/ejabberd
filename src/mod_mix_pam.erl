@@ -22,18 +22,20 @@
 %%%----------------------------------------------------------------------
 -module(mod_mix_pam).
 -behaviour(gen_mod).
--protocol({xep, 405, '0.2.1'}).
+-protocol({xep, 405, '0.3.0'}).
 
 %% gen_mod callbacks
 -export([start/2, stop/1, reload/3, depends/2, mod_opt_type/1, mod_options/1]).
+-export([mod_doc/0]).
 %% Hooks and handlers
 -export([bounce_sm_packet/1,
 	 disco_sm_features/5,
 	 remove_user/2,
 	 process_iq/1]).
 
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("logger.hrl").
+-include("translate.hrl").
 
 -define(MIX_PAM_CACHE, mix_pam_cache).
 
@@ -52,7 +54,7 @@
 %%% API
 %%%===================================================================
 start(Host, Opts) ->
-    Mod = gen_mod:db_mod(Host, Opts, ?MODULE),
+    Mod = gen_mod:db_mod(Opts, ?MODULE),
     case Mod:init(Host, Opts) of
 	ok ->
 	    init_cache(Mod, Host, Opts),
@@ -72,8 +74,8 @@ stop(Host) ->
     gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_MIX_PAM_0).
 
 reload(Host, NewOpts, OldOpts) ->
-    NewMod = gen_mod:db_mod(Host, NewOpts, ?MODULE),
-    OldMod = gen_mod:db_mod(Host, OldOpts, ?MODULE),
+    NewMod = gen_mod:db_mod(NewOpts, ?MODULE),
+    OldMod = gen_mod:db_mod(OldOpts, ?MODULE),
     if NewMod /= OldMod ->
             NewMod:init(Host, NewOpts);
        true ->
@@ -84,20 +86,57 @@ reload(Host, NewOpts, OldOpts) ->
 depends(_Host, _Opts) ->
     [].
 
-mod_opt_type(db_type) -> fun(T) -> ejabberd_config:v_db(?MODULE, T) end;
-mod_opt_type(O) when O == cache_life_time; O == cache_size ->
-    fun (I) when is_integer(I), I > 0 -> I;
-        (infinity) -> infinity
-    end;
-mod_opt_type(O) when O == use_cache; O == cache_missed ->
-    fun (B) when is_boolean(B) -> B end.
+mod_opt_type(db_type) ->
+    econf:db_type(?MODULE);
+mod_opt_type(use_cache) ->
+    econf:bool();
+mod_opt_type(cache_size) ->
+    econf:pos_int(infinity);
+mod_opt_type(cache_missed) ->
+    econf:bool();
+mod_opt_type(cache_life_time) ->
+    econf:timeout(second, infinity).
 
 mod_options(Host) ->
     [{db_type, ejabberd_config:default_db(Host, ?MODULE)},
-     {use_cache, ejabberd_config:use_cache(Host)},
-     {cache_size, ejabberd_config:cache_size(Host)},
-     {cache_missed, ejabberd_config:cache_missed(Host)},
-     {cache_life_time, ejabberd_config:cache_life_time(Host)}].
+     {use_cache, ejabberd_option:use_cache(Host)},
+     {cache_size, ejabberd_option:cache_size(Host)},
+     {cache_missed, ejabberd_option:cache_missed(Host)},
+     {cache_life_time, ejabberd_option:cache_life_time(Host)}].
+
+mod_doc() ->
+    #{desc =>
+          [?T("This module implements "
+              "https://xmpp.org/extensions/xep-0405.html"
+              "[XEP-0405: Mediated Information eXchange (MIX): "
+              "Participant Server Requirements]. "
+              "The module is needed if MIX compatible clients "
+              "on your server are going to join MIX channels "
+              "(either on your server or on any remote servers)."), "",
+           ?T("NOTE: 'mod_mix' is not required for this module "
+              "to work, however, without 'mod_mix_pam' the MIX "
+              "functionality of your local XMPP clients will be impaired.")],
+      opts =>
+          [{db_type,
+            #{value => "mnesia | sql",
+              desc =>
+                  ?T("Same as top-level 'default_db' option, but applied to this module only.")}},
+           {use_cache,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level 'use_cache' option, but applied to this module only.")}},
+           {cache_size,
+            #{value => "pos_integer() | infinity",
+              desc =>
+                  ?T("Same as top-level 'cache_size' option, but applied to this module only.")}},
+           {cache_missed,
+            #{value => "true | false",
+              desc =>
+                  ?T("Same as top-level 'cache_missed' option, but applied to this module only.")}},
+           {cache_life_time,
+            #{value => "timeout()",
+              desc =>
+                  ?T("Same as top-level 'cache_life_time' option, but applied to this module only.")}}]}.
 
 -spec bounce_sm_packet({term(), stanza()}) -> {term(), stanza()}.
 bounce_sm_packet({_, #message{to = #jid{lresource = <<>>} = To,
@@ -250,7 +289,7 @@ process_iq_error(#iq{type = error} = ErrIQ, #iq{sub_els = [El]} = IQ) ->
 	    ejabberd_router:route_error(IQ, Err)
     end;
 process_iq_error(timeout, IQ) ->
-    Txt = <<"Request has timed out">>,
+    Txt = ?T("Request has timed out"),
     Err = xmpp:err_recipient_unavailable(Txt, IQ#iq.lang),
     ejabberd_router:route_error(IQ, Err).
 
@@ -264,22 +303,22 @@ make_channel_id(JID, ID) ->
 %%%===================================================================
 -spec missing_channel_error(stanza()) -> stanza_error().
 missing_channel_error(Pkt) ->
-    Txt = <<"Attribute 'channel' is required for this request">>,
+    Txt = ?T("Attribute 'channel' is required for this request"),
     xmpp:err_bad_request(Txt, xmpp:get_lang(Pkt)).
 
 -spec forbidden_query_error(stanza()) -> stanza_error().
 forbidden_query_error(Pkt) ->
-    Txt = <<"Query to another users is forbidden">>,
+    Txt = ?T("Query to another users is forbidden"),
     xmpp:err_forbidden(Txt, xmpp:get_lang(Pkt)).
 
 -spec unsupported_query_error(stanza()) -> stanza_error().
 unsupported_query_error(Pkt) ->
-    Txt = <<"No module is handling this query">>,
+    Txt = ?T("No module is handling this query"),
     xmpp:err_service_unavailable(Txt, xmpp:get_lang(Pkt)).
 
 -spec db_error(stanza()) -> stanza_error().
 db_error(Pkt) ->
-    Txt = <<"Database failure">>,
+    Txt = ?T("Database failure"),
     xmpp:err_internal_server_error(Txt, xmpp:get_lang(Pkt)).
 
 %%%===================================================================
@@ -329,19 +368,16 @@ init_cache(Mod, Host, Opts) ->
 
 -spec cache_opts(gen_mod:opts()) -> [proplists:property()].
 cache_opts(Opts) ->
-    MaxSize = gen_mod:get_opt(cache_size, Opts),
-    CacheMissed = gen_mod:get_opt(cache_missed, Opts),
-    LifeTime = case gen_mod:get_opt(cache_life_time, Opts) of
-		   infinity -> infinity;
-		   I -> timer:seconds(I)
-	       end,
+    MaxSize = mod_mix_pam_opt:cache_size(Opts),
+    CacheMissed = mod_mix_pam_opt:cache_missed(Opts),
+    LifeTime = mod_mix_pam_opt:cache_life_time(Opts),
     [{max_size, MaxSize}, {cache_missed, CacheMissed}, {life_time, LifeTime}].
 
 -spec use_cache(module(), binary()) -> boolean().
 use_cache(Mod, Host) ->
     case erlang:function_exported(Mod, use_cache, 1) of
 	true -> Mod:use_cache(Host);
-	false -> gen_mod:get_module_opt(Host, ?MODULE, use_cache)
+	false -> mod_mix_pam_opt:use_cache(Host)
     end.
 
 -spec cache_nodes(module(), binary()) -> [node()].

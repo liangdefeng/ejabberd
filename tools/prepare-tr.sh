@@ -10,17 +10,17 @@
 
 extract_lang_src2pot ()
 {
-	./tools/extract-tr.sh . > priv/msgs/ejabberd.pot
+	./tools/extract-tr.sh src $DEPS_DIR/xmpp/src > $PO_DIR/ejabberd.pot
 }
 
 extract_lang_popot2po ()
 {
 	LANG_CODE=$1
-	PO_PATH=$MSGS_DIR/$LANG_CODE.po
-	POT_PATH=$MSGS_DIR/$PROJECT.pot
+	PO_PATH=$PO_DIR/$LANG_CODE.po
+	POT_PATH=$PO_DIR/$PROJECT.pot
 
-	msgmerge $PO_PATH $POT_PATH >$PO_PATH.translate 2>/dev/null
-	mv $PO_PATH.translate $PO_PATH 
+	msgmerge $PO_PATH $POT_PATH >$PO_PATH.translate 2>>$LOG
+	mv $PO_PATH.translate $PO_PATH
 }
 
 extract_lang_po2msg ()
@@ -32,7 +32,7 @@ extract_lang_po2msg ()
 	MSGSTR_PATH=$PO_PATH.msgstr
 	MSGS_PATH=$LANG_CODE.msg
 
-	cd $MSGS_DIR
+	cd $PO_DIR
 
 	# Check PO has correct ~
 	# Let's convert to C format so we can use msgfmt
@@ -48,12 +48,18 @@ extract_lang_po2msg ()
 	msgattrib $PO_PATH --translated --no-fuzzy --no-obsolete --no-location --no-wrap | grep "^msg" | tail --lines=+3 >$MS_PATH
 	grep "^msgid" $PO_PATH.ms | sed 's/^msgid //g' >$MSGID_PATH
 	grep "^msgstr" $PO_PATH.ms | sed 's/^msgstr //g' >$MSGSTR_PATH
-	echo "%% -*- coding: latin-1 -*-" >$MSGS_PATH
+	echo "%% Generated automatically" >$MSGS_PATH
+	echo "%% DO NOT EDIT: run \`make translations\` instead" >>$MSGS_PATH
+	echo "%% To improve translations please read:" >>$MSGS_PATH
+	echo "%%   https://docs.ejabberd.im/developer/extending-ejabberd/localization/" >>$MSGS_PATH
+	echo "" >>$MSGS_PATH
 	paste $MSGID_PATH $MSGSTR_PATH --delimiter=, | awk '{print "{" $0 "}."}' | sort -g >>$MSGS_PATH
 
 	rm $MS_PATH
 	rm $MSGID_PATH
 	rm $MSGSTR_PATH
+
+	mv $MSGS_PATH $MSGS_DIR
 }
 
 extract_lang_updateall ()
@@ -70,7 +76,7 @@ extract_lang_updateall ()
                 LANG_CODE=${i%.msg}
 		echo -n $LANG_CODE | awk '{printf "%-6s", $1 }'
 
-		PO=$LANG_CODE.po
+		PO=$PO_DIR/$LANG_CODE.po
 
 		extract_lang_popot2po $LANG_CODE
 		extract_lang_po2msg $LANG_CODE
@@ -89,12 +95,24 @@ extract_lang_updateall ()
 	done
 	echo ""
 	rm messages.mo
+	grep -v " done" $LOG
+	rm $LOG
 
 	cd ..
 }
 
 EJA_DIR=`pwd`
 PROJECT=ejabberd
+DEPS_DIR=$1
 MSGS_DIR=$EJA_DIR/priv/msgs
+LOG=/tmp/ejabberd-translate-errors.log
+PO_DIR=$EJA_DIR/$DEPS_DIR/ejabberd_po/src/
+if [ ! -f $EJA_DIR/$DEPS_DIR/ejabberd_po/src/ejabberd.pot ]; then
+    echo "Couldn't find the required ejabberd_po repository in"
+    echo "  $PO_DIR"
+    echo "Run: ./configure --enable-tools; ./rebar get-deps"
+    exit 1
+fi
+echo "Using PO files from $PO_DIR."
 
 extract_lang_updateall

@@ -4,7 +4,7 @@
 %%% Created : 15 Apr 2016 by Evgeny Khramtsov <ekhramtsov@process-one.net>
 %%%
 %%%
-%%% ejabberd, Copyright (C) 2002-2019   ProcessOne
+%%% ejabberd, Copyright (C) 2002-2021   ProcessOne
 %%%
 %%% This program is free software; you can redistribute it and/or
 %%% modify it under the terms of the GNU General Public License as
@@ -32,7 +32,7 @@
 	 is_empty_for_user/2, is_empty_for_room/3]).
 
 -include_lib("stdlib/include/ms_transform.hrl").
--include("xmpp.hrl").
+-include_lib("xmpp/include/xmpp.hrl").
 -include("logger.hrl").
 -include("mod_mam.hrl").
 
@@ -85,7 +85,12 @@ remove_from_archive(LUser, LServer, WithJid) ->
     US = {LUser, LServer},
     Peer = jid:remove_resource(jid:split(WithJid)),
     F = fun () ->
-	    Msgs = mnesia:match_object(#archive_msg{us = US, bare_peer = Peer, _ = '_'}),
+	    Msgs = mnesia:select(
+		     archive_msg,
+		     ets:fun2ms(
+		       fun(#archive_msg{us = US1, bare_peer = Peer1} = Msg)
+			  when US1 == US, Peer1 == Peer -> Msg
+		       end)),
 	    lists:foreach(fun mnesia:delete_object/1, Msgs)
 	end,
     case mnesia:transaction(F) of
@@ -122,7 +127,7 @@ delete_old_user_messages(User, TimeStamp, Type) ->
 	{atomic, ok} ->
 	    delete_old_user_messages(NextRecord, TimeStamp, Type);
 	{aborted, Err} ->
-	    ?ERROR_MSG("Cannot delete old MAM messages: ~s", [Err]),
+	    ?ERROR_MSG("Cannot delete old MAM messages: ~ts", [Err]),
 	    Err
     end.
 
@@ -133,7 +138,7 @@ store(Pkt, _, {LUser, LServer}, Type, Peer, Nick, _Dir, TS) ->
     case {mnesia:table_info(archive_msg, disc_only_copies),
 	  mnesia:table_info(archive_msg, memory)} of
 	{[_|_], TableSize} when TableSize > ?TABLE_SIZE_LIMIT ->
-	    ?ERROR_MSG("MAM archives too large, won't store message for ~s@~s",
+	    ?ERROR_MSG("MAM archives too large, won't store message for ~ts@~ts",
 		       [LUser, LServer]),
 	    {error, overflow};
 	_ ->
@@ -153,7 +158,7 @@ store(Pkt, _, {LUser, LServer}, Type, Peer, Nick, _Dir, TS) ->
 		{atomic, ok} ->
 		    ok;
 		{aborted, Err} ->
-		    ?ERROR_MSG("Cannot add message to MAM archive of ~s@~s: ~s",
+		    ?ERROR_MSG("Cannot add message to MAM archive of ~ts@~ts: ~ts",
 			       [LUser, LServer, Err]),
 		    Err
 	    end

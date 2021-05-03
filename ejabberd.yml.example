@@ -12,37 +12,31 @@
 ### ******* MAKE SURE YOU INDENT SECTIONS CORRECTLY *******
 ### *******************************************************
 ### Refer to http://en.wikipedia.org/wiki/YAML for the brief description.
-### However, ejabberd treats different literals as different types:
-###
-### - unquoted or single-quoted strings. They are called "atoms".
-###   Example: dog, 'Jupiter', '3.14159', YELLOW
-###
-### - numeric literals. Example: 3, -45.0, .0
-###
-### - quoted or folded strings.
-###   Examples of quoted string: "Lizzard", "orange".
-###   Example of folded string:
-###   > Art thou not Romeo,
-###     and a Montague?
 ###
 
 hosts:
-  - "localhost"
+  - localhost
 
-loglevel: 4
-log_rotate_size: 10485760
-log_rotate_date: ""
-log_rotate_count: 1
-log_rate_limit: 100
+loglevel: info
 
-certfiles:
-  - "/etc/letsencrypt/live/localhost/fullchain.pem"
-  - "/etc/letsencrypt/live/localhost/privkey.pem"
+## If you already have certificates, list them here
+# certfiles:
+#  - /etc/letsencrypt/live/domain.tld/fullchain.pem
+#  - /etc/letsencrypt/live/domain.tld/privkey.pem
 
 listen:
   -
     port: 5222
     ip: "::"
+    module: ejabberd_c2s
+    max_stanza_size: 262144
+    shaper: c2s_shaper
+    access: c2s
+    starttls_required: true
+  -
+    port: 5223
+    ip: "::"
+    tls: true
     module: ejabberd_c2s
     max_stanza_size: 262144
     shaper: c2s_shaper
@@ -59,18 +53,29 @@ listen:
     module: ejabberd_http
     tls: true
     request_handlers:
-      "/admin": ejabberd_web_admin
-      "/api": mod_http_api
-      "/bosh": mod_bosh
-      "/captcha": ejabberd_captcha
-      "/upload": mod_http_upload
-      "/ws": ejabberd_http_ws
+      /admin: ejabberd_web_admin
+      /api: mod_http_api
+      /bosh: mod_bosh
+      /captcha: ejabberd_captcha
+      /upload: mod_http_upload
+      /ws: ejabberd_http_ws
   -
     port: 5280
     ip: "::"
     module: ejabberd_http
     request_handlers:
-      "/admin": ejabberd_web_admin
+      /admin: ejabberd_web_admin
+      /.well-known/acme-challenge: ejabberd_acme
+  -
+    port: 3478
+    ip: "::"
+    transport: udp
+    module: ejabberd_stun
+    use_turn: true
+    ## The server's public IPv4 address:
+    # turn_ipv4_address: "203.0.113.3"
+    ## The server's public IPv6 address:
+    # turn_ipv6_address: "2001:db8::3"
   -
     port: 1883
     ip: "::"
@@ -84,25 +89,25 @@ acl:
     user_regexp: ""
   loopback:
     ip:
-      - "127.0.0.0/8"
-      - "::1/128"
+      - 127.0.0.0/8
+      - ::1/128
 
 access_rules:
   local:
-    - allow: local
+    allow: local
   c2s:
-    - deny: blocked
-    - allow
+    deny: blocked
+    allow: all
   announce:
-    - allow: admin
+    allow: admin
   configure:
-    - allow: admin
+    allow: admin
   muc_create:
-    - allow: local
+    allow: local
   pubsub_createnode:
-    - allow: local
+    allow: local
   trusted_network:
-    - allow: loopback
+    allow: loopback
 
 api_permissions:
   "console commands":
@@ -112,14 +117,14 @@ api_permissions:
     what: "*"
   "admin access":
     who:
-      - access:
-          - allow:
-            - acl: loopback
-            - acl: admin
-      - oauth:
-        - scope: "ejabberd:admin"
-        - access:
-          - allow:
+      access:
+        allow:
+          - acl: loopback
+          - acl: admin
+      oauth:
+        scope: "ejabberd:admin"
+        access:
+          allow:
             - acl: loopback
             - acl: admin
     what:
@@ -128,23 +133,25 @@ api_permissions:
       - "!start"
   "public commands":
     who:
-      - ip: "127.0.0.1/8"
+      ip: 127.0.0.1/8
     what:
-      - "status"
-      - "connected_users_number"
+      - status
+      - connected_users_number
 
 shaper:
-  normal: 1000
-  fast: 50000
+  normal:
+    rate: 3000
+    burst_size: 20000
+  fast: 100000
 
 shaper_rules:
   max_user_sessions: 10
   max_user_offline_messages:
-    - 5000: admin
-    - 100
+    5000: admin
+    100: all
   c2s_shaper:
-    - none: admin
-    - normal
+    none: admin
+    normal: all
   s2s_shaper: fast
 
 modules:
@@ -163,7 +170,11 @@ modules:
   mod_fail2ban: {}
   mod_http_api: {}
   mod_http_upload:
-    put_url: "https://@HOST@:5443/upload"
+    put_url: https://@HOST@:5443/upload
+    custom_headers:
+      "Access-Control-Allow-Origin": "https://@HOST@"
+      "Access-Control-Allow-Methods": "GET,HEAD,PUT,OPTIONS"
+      "Access-Control-Allow-Headers": "Content-Type"
   mod_last: {}
   mod_mam:
     ## Mnesia is limited to 2GB, better to use an SQL backend
@@ -196,11 +207,11 @@ modules:
   mod_pubsub:
     access_createnode: pubsub_createnode
     plugins:
-      - "flat"
-      - "pep"
+      - flat
+      - pep
     force_node_config:
       ## Avoid buggy clients to make their bookmarks public
-      "storage:bookmarks":
+      storage:bookmarks:
         access_model: whitelist
   mod_push: {}
   mod_push_keepalive: {}
@@ -217,6 +228,7 @@ modules:
   mod_shared_roster: {}
   mod_stream_mgmt:
     resend_on_timeout: if_offline
+  mod_stun_disco: {}
   mod_vcard: {}
   mod_vcard_xupdate: {}
   mod_version:
