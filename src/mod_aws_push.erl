@@ -659,7 +659,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 							"\\\"alert\\\":{" ++
 							"\\\"title\\\":\\\"" ++
 							"Text message from "
-							++ binary_to_list(FromUser)
+							++ FromUser
 							++ "\\\",\\\"body\\\":\\\""
 							++ Data3
 							++ "\\\"}}}\"}",
