@@ -176,9 +176,9 @@ get_room_title(From) ->
 	TupleList = mod_muc_admin:get_room_options(RoomId,Server),
 	case lists:keyfind(<<"title">>, 1, TupleList) of
 		{_, Title} ->
-			Title;
+			binary_to_list(Title);
 		_ ->
-			<<"">>
+			""
 	end.
 
 is_muc(From) ->
@@ -197,7 +197,7 @@ process_offline_message({From, To, #message{body = [#text{data = Data}] = Body} 
 				true ->
 					FromResource = From#jid.lresource,
 					RoomTitle = get_room_title(From),
-					FromUser = <<FromResource/binary, <<" in group ">>, RoomTitle/binary>>,
+					FromUser = binary_to_list(FromResource) ++ " in group " ++  RoomTitle,
 					send_notification(FromUser, ToJID, Data, offline, missed);
 				_ ->
 					case Body of
@@ -205,7 +205,7 @@ process_offline_message({From, To, #message{body = [#text{data = Data}] = Body} 
 							ok;
 						_ ->
 							#jid{user = FromUser} = From,
-							send_notification(FromUser, ToJID, Data, offline, missed)
+							send_notification(binary_to_list(FromUser), ToJID, Data, offline, missed)
 					end
 			end
 	end;
@@ -229,7 +229,7 @@ process_offline_message({From, To, #message{} = Pkt}) ->
 							Type2 = binary_to_atom(string:lowercase(Type), unicode),
 							ToJID = jid:tolower(jid:remove_resource(To)),
 							#jid{user = FromUser} = From,
-							send_notification(FromUser, ToJID, <<>>, Type2, Status)
+							send_notification(binary_to_list(FromUser), ToJID, <<>>, Type2, Status)
 					end;
 				_ ->
 					ok
@@ -496,7 +496,8 @@ sm_receive_packet(#message{from = From, to = To} = Pkt) ->
 					?DEBUG("status is start, send pushkit notification.~n",[]),
 					Type2 = binary_to_atom(string:lowercase(Type), unicode),
 					ToJID = jid:tolower(jid:remove_resource(To)),
-					send_notification(From, ToJID, <<>>, Type2, start);
+					jid#{luser = FromUser} = From,
+					send_notification(binary_to_list(FromUser), ToJID, <<>>, Type2, start);
 				_ ->
 
 					?DEBUG("Status is start, do nothing when user online.~n",[]),
@@ -540,7 +541,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 
 	case Type of
 		fcm ->
-			Message = "You have a message from " ++ binary_to_list(FromUser),
+			Message = "You have a message from " ++ FromUser,
 			try erlcloud_sns:publ(target, Arn,
 				Message, undefined,
 				get_attributes(Type), erlcloud_aws:default_config()) of
@@ -558,7 +559,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{\\\"title\\\":\\\""
 							++ "Location message from "
-							++ binary_to_list(FromUser)
+							++ FromUser
 							++ "\\\"}}}\"}",
 						{Arn, Message};
 					photo ->
@@ -568,7 +569,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{\\\"title\\\":\\\""
 							++ "Photo message from "
-							++ binary_to_list(FromUser)
+							++ FromUser
 							++ "\\\"}}}\"}",
 						{Arn, Message};
 					files ->
@@ -578,7 +579,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 							"\\\"content-available\\\":1," ++
 							"\\\"alert\\\":{\\\"title\\\":\\\""
 							++ "File message from "
-							++ binary_to_list(FromUser)
+							++ FromUser
 							++ "\\\"}}}\"}",
 						{Arn, Message};
 					voice ->
@@ -591,7 +592,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "Voice call from "
-										++ binary_to_list(FromUser)
+										++ FromUser
 										++ "\\\"}}}\"}";
 								missed ->
 									"{\"APNS\":" ++
@@ -600,7 +601,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "Missed a voice call from "
-										++ binary_to_list(FromUser)
+										++ FromUser
 										++ "\\\"}}}\"}";
 								_ ->
 									"{\"APNS\":" ++
@@ -609,7 +610,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "Voice message from "
-										++ binary_to_list(FromUser)
+										++ FromUser
 										++ "\\\"}}}\"}"
 							end,
 						{Arn, Message};
@@ -623,7 +624,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "Video call from "
-										++ binary_to_list(FromUser)
+										++ FromUser
 										++ "\\\"}}}\"}";
 								missed ->
 									"{\"APNS\":" ++
@@ -632,7 +633,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "Missed a video call from "
-										++ binary_to_list(FromUser)
+										++ FromUser
 										++ "\\\"}}}\"}";
 								_ ->
 									"{\"APNS\":" ++
@@ -641,7 +642,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 										"\\\"content-available\\\":1," ++
 										"\\\"alert\\\":{\\\"title\\\":\\\""
 										++ "Video message from "
-										++ binary_to_list(FromUser)
+										++ FromUser
 										++ "\\\"}}}\"}"
 								end,
 						{Arn, Message};
