@@ -496,7 +496,7 @@ sm_receive_packet(#message{from = From, to = To} = Pkt) ->
 					?DEBUG("status is start, send pushkit notification.~n",[]),
 					Type2 = binary_to_atom(string:lowercase(Type), unicode),
 					ToJID = jid:tolower(jid:remove_resource(To)),
-					jid#{luser = FromUser} = From,
+					#jid{luser = FromUser} = From,
 					send_notification(binary_to_list(FromUser), ToJID, <<>>, Type2, start);
 				_ ->
 
