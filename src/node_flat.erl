@@ -750,27 +750,25 @@ get_items(Nidx, _From, #rsm_set{max = Max, index = IncIndex,
                     end,
             {Offset, ItemsPage} =
                 case {IncIndex, Before, After} of
+                    {undefined, undefined, undefined} ->
+                        {0, lists:sublist(RItems, Limit)};
                     {I, undefined, undefined} ->
                         SubList = lists:nthtail(I, RItems),
                         {I, lists:sublist(SubList, Limit)};
                     {_, <<>>, undefined} ->
                         %% 2.5 Requesting the Last Page in a Result Set
                         SubList = lists:reverse(RItems),
-                        {0, lists:sublist(SubList, Limit)};
+                        {Count, lists:sublist(SubList, Limit)};
                     {_, Stamp, undefined} ->
                         BeforeNow = encode_stamp(Stamp),
-                        SubList = lists:dropwhile(
-                                    fun(#pubsub_item{creation = {Now, _}}) ->
-                                            Now >= BeforeNow
-                                    end, lists:reverse(RItems)),
-                        {0, lists:sublist(SubList, Limit)};
+                        {NewIndex, SubList} = extract_sublist(before_now, BeforeNow,
+                                                              0, lists:reverse(RItems)),
+                        {Count-NewIndex-1, lists:sublist(SubList, Limit)};
                     {_, undefined, Stamp} ->
                         AfterNow = encode_stamp(Stamp),
-                        SubList = lists:dropwhile(
-                                    fun(#pubsub_item{creation = {Now, _}}) ->
-                                            Now =< AfterNow
-                                    end, RItems),
-                        {0, lists:sublist(SubList, Limit)}
+                        {NewIndex, SubList} = extract_sublist(after_now, AfterNow,
+                                                              0, RItems),
+                        {NewIndex, lists:sublist(SubList, Limit)}
                 end,
             Rsm = rsm_page(Count, IncIndex, Offset, ItemsPage),
             {result, {ItemsPage, Rsm}}
@@ -811,6 +809,13 @@ get_items(Nidx, JID, AccessModel, PresenceSubscription, RosterGroup, _SubId, RSM
 	true ->
 	    get_items(Nidx, JID, RSM)
     end.
+
+extract_sublist(A, Now, Index, [#pubsub_item{creation = {Creation, _}} | RItems])
+  when ((A == before_now) and (Creation >= Now))
+    or ((A == after_now) and (Creation =< Now)) ->
+    extract_sublist(A, Now, Index+1, RItems);
+extract_sublist(_, _, Index, RItems) ->
+    {Index, RItems}.
 
 get_only_item(Nidx, From) ->
     get_last_items(Nidx, From, 1).

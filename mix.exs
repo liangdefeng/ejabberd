@@ -99,7 +99,7 @@ defmodule Ejabberd.Mixfile do
      {:idna, "~> 6.0"},
      {:jiffy, "~> 1.0.5"},
      {:jose, "~> 1.8"},
-     {:lager, "~> 3.6.0"},
+     {:lager, "~> 3.9.1"},
      {:mqtree, "~> 1.0"},
      {:p1_acme, "~> 1.0"},
      {:p1_mysql, "~> 1.0"},
@@ -128,7 +128,7 @@ defmodule Ejabberd.Mixfile do
 
   defp cond_deps do
     for {:true, dep} <- [{config(:pam), {:epam, "~> 1.0"}},
-                         {config(:redis), {:eredis, "~> 1.0"}},
+                         {config(:redis), {:eredis, "~> 1.2.0"}},
                          {config(:zlib), {:ezlib, "~> 1.0"}},
                          {config(:lua), {:luerl, "~> 0.3.1"}},
                          {config(:sqlite), {:sqlite3, "~> 1.1"}}], do:

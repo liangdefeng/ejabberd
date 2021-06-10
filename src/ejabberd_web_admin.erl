@@ -585,8 +585,12 @@ list_vhosts2(Lang, Hosts) ->
 	 [?XE(<<"thead">>,
 	      [?XE(<<"tr">>,
 		   [?XCT(<<"td">>, ?T("Host")),
-		    ?XCT(<<"td">>, ?T("Registered Users")),
-		    ?XCT(<<"td">>, ?T("Online Users"))])]),
+		    ?XACT(<<"td">>,
+                          [{<<"class">>, <<"alignright">>}],
+                          ?T("Registered Users")),
+		    ?XACT(<<"td">>,
+                          [{<<"class">>, <<"alignright">>}],
+                          ?T("Online Users"))])]),
 	  ?XE(<<"tbody">>,
 	      (lists:map(fun (Host) ->
 				 OnlineUsers =
@@ -598,9 +602,11 @@ list_vhosts2(Lang, Hosts) ->
 					  [?AC(<<"../server/", Host/binary,
 						 "/">>,
 					       Host)]),
-				      ?XC(<<"td">>,
+				      ?XAC(<<"td">>,
+                                           [{<<"class">>, <<"alignright">>}],
 					  (pretty_string_int(RegisteredUsers))),
-				      ?XC(<<"td">>,
+				      ?XAC(<<"td">>,
+                                           [{<<"class">>, <<"alignright">>}],
 					  (pretty_string_int(OnlineUsers)))])
 			 end,
 			 SHosts)))])].
@@ -706,7 +712,9 @@ list_given_users(Host, Users, Prefix, Lang, URLFunc) ->
 	[?XE(<<"thead">>,
 	     [?XE(<<"tr">>,
 		  [?XCT(<<"td">>, ?T("User")),
-		   ?XCT(<<"td">>, ?T("Offline Messages")),
+		   ?XACT(<<"td">>,
+                         [{<<"class">>, <<"alignright">>}],
+                         ?T("Offline Messages")),
 		   ?XCT(<<"td">>, ?T("Last Activity"))])]),
 	 ?XE(<<"tbody">>,
 	     (lists:map(fun (_SU = {Server, User}) ->
@@ -749,7 +757,9 @@ list_given_users(Host, Users, Prefix, Lang, URLFunc) ->
 							misc:url_encode(User),
 							Server})),
 					      (us_to_list(US)))]),
-				     ?XE(<<"td">>, FQueueLen),
+				     ?XAE(<<"td">>,
+                                          [{<<"class">>, <<"alignright">>}],
+                                          FQueueLen),
 				     ?XC(<<"td">>, FLast)])
 			end,
 			Users)))]).
@@ -808,16 +818,24 @@ get_stats(global, Lang) ->
 	  [?XE(<<"tbody">>,
 	       [?XE(<<"tr">>,
 		    [?XCT(<<"td">>, ?T("Registered Users:")),
-		     ?XC(<<"td">>, (pretty_string_int(RegisteredUsers)))]),
+		     ?XAC(<<"td">>,
+                          [{<<"class">>, <<"alignright">>}],
+                          (pretty_string_int(RegisteredUsers)))]),
 		?XE(<<"tr">>,
 		    [?XCT(<<"td">>, ?T("Online Users:")),
-		     ?XC(<<"td">>, (pretty_string_int(OnlineUsers)))]),
+		     ?XAC(<<"td">>,
+                          [{<<"class">>, <<"alignright">>}],
+                          (pretty_string_int(OnlineUsers)))]),
 		?XE(<<"tr">>,
 		    [?XCT(<<"td">>, ?T("Outgoing s2s Connections:")),
-		     ?XC(<<"td">>, (pretty_string_int(OutS2SNumber)))]),
+		     ?XAC(<<"td">>,
+                          [{<<"class">>, <<"alignright">>}],
+                          (pretty_string_int(OutS2SNumber)))]),
 		?XE(<<"tr">>,
 		    [?XCT(<<"td">>, ?T("Incoming s2s Connections:")),
-		     ?XC(<<"td">>, (pretty_string_int(InS2SNumber)))])])])];
+		     ?XAC(<<"td">>,
+                          [{<<"class">>, <<"alignright">>}],
+                          (pretty_string_int(InS2SNumber)))])])])];
 get_stats(Host, Lang) ->
     OnlineUsers =
 	length(ejabberd_sm:get_vh_session_list(Host)),
@@ -827,10 +845,14 @@ get_stats(Host, Lang) ->
 	  [?XE(<<"tbody">>,
 	       [?XE(<<"tr">>,
 		    [?XCT(<<"td">>, ?T("Registered Users:")),
-		     ?XC(<<"td">>, (pretty_string_int(RegisteredUsers)))]),
+		     ?XAC(<<"td">>,
+                          [{<<"class">>, <<"alignright">>}],
+                          (pretty_string_int(RegisteredUsers)))]),
 		?XE(<<"tr">>,
 		    [?XCT(<<"td">>, ?T("Online Users:")),
-		     ?XC(<<"td">>, (pretty_string_int(OnlineUsers)))])])])].
+		     ?XAC(<<"td">>,
+                          [{<<"class">>, <<"alignright">>}],
+                          (pretty_string_int(OnlineUsers)))])])])].
 
 list_online_users(Host, _Lang) ->
     Users = [{S, U}
@@ -1151,17 +1173,23 @@ get_node(global, Node, [<<"db">>], Query, Lang) ->
 								{T, S, M};
 							    _ -> {unknown, 0, 0}
 							  end,
+				   MemoryB = Memory*erlang:system_info(wordsize),
 				   ?XE(<<"tr">>,
-				       [?XC(<<"td">>, STable),
+				       [?XE(<<"td">>,
+					  [?AC(<<"./", STable/binary,
+						 "/">>,
+					       STable)]),
 					?XE(<<"td">>,
 					    [db_storage_select(STable, Type,
 							       Lang)]),
+				        ?XAE(<<"td">>,
+					     [{<<"class">>, <<"alignright">>}],
+					      [?AC(<<"./", STable/binary,
+						 "/1/">>,
+					     (pretty_string_int(Size)))]),
 					?XAC(<<"td">>,
 					     [{<<"class">>, <<"alignright">>}],
-					     (pretty_string_int(Size))),
-					?XAC(<<"td">>,
-					     [{<<"class">>, <<"alignright">>}],
-					     (pretty_string_int(Memory)))])
+					     (pretty_string_int(MemoryB)))])
 			   end,
 			   STables),
 	  [?XC(<<"h1">>,
@@ -1177,8 +1205,12 @@ get_node(global, Node, [<<"db">>], Query, Lang) ->
 			       [?XE(<<"tr">>,
 				    [?XCT(<<"td">>, ?T("Name")),
 				     ?XCT(<<"td">>, ?T("Storage Type")),
-				     ?XCT(<<"td">>, ?T("Elements")),
-				     ?XCT(<<"td">>, ?T("Memory"))])]),
+				     ?XACT(<<"td">>,
+                                           [{<<"class">>, <<"alignright">>}],
+                                           ?T("Elements")),
+				     ?XACT(<<"td">>,
+                                           [{<<"class">>, <<"alignright">>}],
+                                           ?T("Memory"))])]),
 			   ?XE(<<"tbody">>,
 			       (Rows ++
 				  [?XE(<<"tr">>,
@@ -1189,6 +1221,10 @@ get_node(global, Node, [<<"db">>], Query, Lang) ->
 						      <<"submit">>,
 						      ?T("Submit"))])])]))])])]
     end;
+get_node(global, Node, [<<"db">>, TableName], _Query, Lang) ->
+    make_table_view(Node, TableName, Lang);
+get_node(global, Node, [<<"db">>, TableName, PageNumber], _Query, Lang) ->
+    make_table_elements_view(Node, TableName, Lang, binary_to_integer(PageNumber));
 get_node(global, Node, [<<"backup">>], Query, Lang) ->
     HomeDirRaw = case {os:getenv("HOME"), os:type()} of
 		   {EnvHome, _} when is_list(EnvHome) -> list_to_binary(EnvHome);
@@ -1344,6 +1380,7 @@ get_node(global, Node, [<<"stats">>], _Query, Lang) ->
 		      [wall_clock]),
     UpTimeS = (str:format("~.3f",
                                            [element(1, UpTime) / 1000])),
+    UpTimeDate = uptime_date(Node),
     CPUTime = ejabberd_cluster:call(Node, erlang, statistics, [runtime]),
     CPUTimeS = (str:format("~.3f",
                                             [element(1, CPUTime) / 1000])),
@@ -1364,6 +1401,10 @@ get_node(global, Node, [<<"stats">>], _Query, Lang) ->
 		    [?XCT(<<"td">>, ?T("Uptime:")),
 		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
 			  UpTimeS)]),
+		?XE(<<"tr">>,
+		    [?X(<<"td">>),
+		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
+			  UpTimeDate)]),
 		?XE(<<"tr">>,
 		    [?XCT(<<"td">>, ?T("CPU Time:")),
 		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
@@ -1457,6 +1498,16 @@ get_node(Host, Node, NPath, Query, Lang) ->
       [] -> [?XC(<<"h1">>, <<"Not Found">>)];
       _ -> Res
     end.
+
+uptime_date(Node) ->
+    Localtime = ejabberd_cluster:call(Node, erlang, localtime, []),
+    Now = calendar:datetime_to_gregorian_seconds(Localtime),
+    {Wall, _} = ejabberd_cluster:call(Node, erlang, statistics, [wall_clock]),
+    LastRestart = Now - (Wall div 1000),
+    {{Year, Month, Day}, {Hour, Minute, Second}} =
+        calendar:gregorian_seconds_to_datetime(LastRestart),
+    str:format("~w-~.2.0w-~.2.0w ~.2.0w:~.2.0w:~.2.0w",
+               [Year, Month, Day, Hour, Minute, Second]).
 
 %%%==================================
 %%%% node parse
@@ -1731,6 +1782,95 @@ pretty_string_int(String) when is_binary(String) ->
 			      end,
 			      {0, <<"">>}, lists:reverse(binary_to_list(String))),
     Result.
+
+%%%==================================
+%%%% mnesia table view
+
+make_table_view(Node, STable, Lang) ->
+    Table = misc:binary_to_atom(STable),
+    TInfo = ejabberd_cluster:call(Node, mnesia, table_info, [Table, all]),
+    {value, {storage_type, Type}} = lists:keysearch(storage_type, 1, TInfo),
+    {value, {size, Size}} = lists:keysearch(size, 1, TInfo),
+    {value, {memory, Memory}} = lists:keysearch(memory, 1, TInfo),
+    MemoryB = Memory*erlang:system_info(wordsize),
+    TableInfo = str:format("~p", [TInfo]),
+    [?XC(<<"h1">>, (str:translate_and_format(Lang, ?T("Database Tables at ~p"),
+                                             [Node]))),
+     ?XAE(<<"table">>, [],
+	  [?XE(<<"tbody">>,
+	       [?XE(<<"tr">>,
+		    [?XCT(<<"td">>, ?T("Name")),
+		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
+                          STable
+                         )]),
+		?XE(<<"tr">>,
+		    [?XCT(<<"td">>, ?T("Node")),
+		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
+                          misc:atom_to_binary(Node)
+                         )]),
+		?XE(<<"tr">>,
+		    [?XCT(<<"td">>, ?T("Storage Type")),
+		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
+                          misc:atom_to_binary(Type)
+                         )]),
+		?XE(<<"tr">>,
+		    [?XCT(<<"td">>, ?T("Elements")),
+                     ?XAE(<<"td">>,
+                          [{<<"class">>, <<"alignright">>}],
+                          [?AC(<<"1/">>,
+                               (pretty_string_int(Size)))])
+                    ]),
+		?XE(<<"tr">>,
+		    [?XCT(<<"td">>, ?T("Memory")),
+		     ?XAC(<<"td">>, [{<<"class">>, <<"alignright">>}],
+                          (pretty_string_int(MemoryB))
+                         )])
+               ])]),
+     ?XC(<<"pre">>, TableInfo)].
+
+make_table_elements_view(Node, STable, Lang, PageNumber) ->
+    Table = misc:binary_to_atom(STable),
+    TInfo = ejabberd_cluster:call(Node, mnesia, table_info, [Table, all]),
+    {value, {storage_type, Type}} = lists:keysearch(storage_type, 1, TInfo),
+    {value, {size, Size}} = lists:keysearch(size, 1, TInfo),
+    PageSize = 500,
+    TableContentErl = get_table_content(Node, Table, Type, PageNumber, PageSize),
+    TableContent = str:format("~p", [TableContentErl]),
+    PagesLinks = build_elements_pages_list(Size, PageNumber, PageSize),
+    [?XC(<<"h1">>, (str:translate_and_format(Lang, ?T("Database Tables at ~p"),
+                                             [Node]))),
+     ?P, ?AC(<<"../">>, STable), ?P
+    ] ++ PagesLinks ++ [?XC(<<"pre">>, TableContent)].
+
+build_elements_pages_list(Size, PageNumber, PageSize) ->
+    PagesNumber = calculate_pages_number(Size, PageSize),
+    PagesSeq = lists:seq(1, PagesNumber),
+    PagesList = [?AC(<<"../", (integer_to_binary(N))/binary, "/">>,
+         <<(integer_to_binary(N))/binary, " ">>)
+     || N <- PagesSeq],
+    lists:keyreplace(
+        [?C(<<(integer_to_binary(PageNumber))/binary, " ">>)],
+        4,
+        PagesList,
+        ?C(<<" [", (integer_to_binary(PageNumber))/binary, "] ">>)).
+
+calculate_pages_number(Size, PageSize) ->
+    Remainer = case Size rem PageSize of
+                   0 -> 0;
+                   _ -> 1
+               end,
+    case (Size div PageSize) + Remainer of
+        1 -> 0;
+        Res -> Res
+    end.
+
+get_table_content(Node, Table, _Type, PageNumber, PageSize) ->
+    Keys1 = lists:sort(ejabberd_cluster:call(Node, mnesia, dirty_all_keys, [Table])),
+    FirstKeyPos = 1 - PageSize + PageNumber*PageSize,
+    Keys = lists:sublist(Keys1, FirstKeyPos, PageSize),
+    Res = [ejabberd_cluster:call(Node, mnesia, dirty_read, [Table, Key])
+           || Key <- Keys],
+    lists:flatten(Res).
 
 %%%==================================
 %%%% navigation menu

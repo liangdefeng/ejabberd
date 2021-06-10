@@ -4,18 +4,18 @@
 	"build": {
 		"dockerfile": "Dockerfile",
 		"args": {
-			"VARIANT": "1.11"
+			"VARIANT": "latest" // 1.11.4
 		}	
 	},
 	"workspaceFolder": "/workspace",
 
 	// Set *default* container specific settings.json values on container create.
 	"settings": {
-		"terminal.integrated.shell.linux": "/bin/zsh",
+		"terminal.integrated.defaultProfile.linux": "/bin/zsh",
 	},
 
 	// Add the IDs of extensions you want installed when the container is created.
-	"extensions": [],
+	"extensions": ["pgourlain.erlang", "jakebecker.elixir-ls"],
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	"forwardPorts": [5222, 5280, 5269],
@@ -24,5 +24,25 @@
 	// "postCreateCommand": "sh .devcontainer/post-create.sh",
 
 	// Uncomment to connect as a non-root user. See https://aka.ms/vscode-remote/containers/non-root.
-	"remoteUser": "vscode"
+	"remoteUser": "vscode",
+	"portsAttributes": {
+		"1883": {
+			"label": "MQTT"
+		},
+		"5222": {
+			"label": "XMPP C2S"
+		},
+		"5223": {
+			"label": "Legacy XMPP C2S"
+		},
+		"5269": {
+			"label": "XMPP S2S"
+		},
+		"5280": {
+			"label": "ejabberd HTTP"
+		},
+		"5443": {
+			"label": "ejabberd HTTPS"
+		}
+	}
 }
