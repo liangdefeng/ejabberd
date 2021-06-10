@@ -38,8 +38,18 @@ stop(Host) ->
 process_sm_iq(#iq{type = set, lang = Lang} = IQ) ->
 	Txt = ?T("Value 'set' of 'type' attribute is not allowed"),
   xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
-process_sm_iq({#iq{type = get, sub_els = [#multi_last_query{}]} = _IQ}) ->
-	ok.
+process_sm_iq({#iq{type = get, sub_els = [#multi_last_query{items = Items}]} = IQ}) ->
+  RetItems = lists:map(fun(#multi_last_item{jid = #jid{luser = LUser, lserver = Server}} = Item) ->
+    case mod_last:get_last_info(LUser, Server) of
+      {ok, {TimeStamp, Status}} ->
+        Item#multi_last_item{seconds = TimeStamp, data = Status};
+      not_found ->
+        Item#multi_last_item{data = "not found"};
+      Error  ->
+        Item#multi_last_item{error = Error}
+    end
+    end, Items),
+  xmpp:make_iq_result(IQ, #multi_last_query{items = RetItems}).
 
 depends(_Host, _Opts) ->
   [].
