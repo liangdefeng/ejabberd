@@ -1,0 +1,36 @@
+version: "3.7"
+services:
+  db:
+    image: postgres:11.12
+    network_mode: bridge
+    ports:
+      - 5432:5432
+    volumes:
+      - "./sql:/docker-entrypoint-initdb.d"
+    environment:
+      POSTGRES_DB: ejabberd
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      MDNS_HOSTNAME: db.local
+
+  jabber:
+    image: ejabberd/ecs:21.04
+    network_mode: bridge
+    ports:
+      - 4560:4560
+      - 5222:5222
+      - 5269:5269
+      - 5280:5280
+      - 5443:5443
+      - 1883:1883
+    volumes:
+      - "./conf:/home/ejabberd/conf"
+      - "./database:/home/ejabberd/database"
+      - "./lib:/home/ejabberd/lib"
+      - "./logs:/home/ejabberd/logs"
+    depends_on:
+      - db
+    links:
+      - db
+    environment:
+      MDNS_HOSTNAME: jabber.local
