@@ -12,7 +12,7 @@
 -export([
   start/2,
   stop/1,
-  process_sm_iq/1,
+  process_local_iq/1,
   depends/2,
   mod_opt_type/1,
   mod_options/1,
@@ -26,30 +26,37 @@
 
 -define(LAST_CACHE, last_activity_cache).
 
+-define(NS_MULTI_LAST, <<"jabber:iq:multi:last">>).
+
 start(Host, _Opts) ->
-    gen_iq_handler:add_iq_handler(ejabberd_sm, Host, ?NS_MULTI_LAST, ?MODULE, process_sm_iq).
+    gen_iq_handler:add_iq_handler(ejabberd_local, Host, ?NS_MULTI_LAST, ?MODULE, process_local_iq).
 stop(Host) ->
-    gen_iq_handler:remove_iq_handler(ejabberd_sm, Host, ?NS_MULTI_LAST).
+    gen_iq_handler:remove_iq_handler(ejabberd_local, Host, ?NS_MULTI_LAST).
 
 %%%
 %%% Serve queries about user last online
 %%%
--spec process_sm_iq(iq()) -> iq().
-process_sm_iq(#iq{type = set, lang = Lang} = IQ) ->
+-spec process_local_iq(iq()) -> iq().
+process_local_iq(#iq{type = set, lang = Lang} = IQ) ->
 	Txt = ?T("Value 'set' of 'type' attribute is not allowed"),
   xmpp:make_error(IQ, xmpp:err_not_allowed(Txt, Lang));
-process_sm_iq({#iq{type = get, sub_els = [#multi_last_query{items = Items}]} = IQ}) ->
-  RetItems = lists:map(fun(#multi_last_item{jid = #jid{luser = LUser, lserver = Server}} = Item) ->
-    case mod_last:get_last_info(LUser, Server) of
-      {ok, {TimeStamp, Status}} ->
-        Item#multi_last_item{seconds = TimeStamp, data = Status};
-      not_found ->
-        Item#multi_last_item{data = "not found"};
-      Error  ->
-        Item#multi_last_item{error = Error}
-    end
-    end, Items),
-  xmpp:make_iq_result(IQ, #multi_last_query{items = RetItems}).
+process_local_iq(#iq{type = get, sub_els = [#multi_last_query{items = Items}]} = IQ) ->
+  RetItems = lists:filtermap(
+    fun(Item) ->
+      #multi_last_item{jid = Jid} = Item,
+      #jid{luser = LUser, lserver = LServer} = Jid,
+      case mod_last:get_last_info(LUser, LServer) of
+        {ok, TimeStamp, Status} ->
+          {true, #multi_last_item{jid = Jid, seconds = TimeStamp, status = Status}};
+        _ ->
+          {true, #multi_last_item{jid = Jid}}
+      end
+    end,
+    Items),
+  xmpp:make_iq_result(IQ, #multi_last_query{items = RetItems});
+process_local_iq(#iq{type = get, lang = Lang} = IQ) ->
+  Txt = ?T("Incorrect request format."),
+  xmpp:make_error(IQ, xmpp:err_unexpected_request(Txt, Lang)).
 
 depends(_Host, _Opts) ->
   [].
