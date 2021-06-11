@@ -23,6 +23,7 @@
 -include_lib("xmpp/include/xmpp.hrl").
 -include("mod_privacy.hrl").
 -include("translate.hrl").
+-include("ejabberd_sql_pt.hrl").
 
 -define(LAST_CACHE, last_activity_cache).
 
@@ -45,7 +46,7 @@ process_local_iq(#iq{type = get, sub_els = [#multi_last_query{items = Items}]} =
     fun(Item) ->
       #multi_last_item{jid = Jid} = Item,
       #jid{luser = LUser, lserver = LServer} = Jid,
-      case mod_last:get_last_info(LUser, LServer) of
+      case get_last(LUser, LServer) of
         {ok, TimeStamp, Status} ->
           {true, #multi_last_item{jid = Jid, seconds = TimeStamp, status = Status}};
         _ ->
@@ -57,6 +58,19 @@ process_local_iq(#iq{type = get, sub_els = [#multi_last_query{items = Items}]} =
 process_local_iq(#iq{type = get, lang = Lang} = IQ) ->
   Txt = ?T("Incorrect request format."),
   xmpp:make_error(IQ, xmpp:err_unexpected_request(Txt, Lang)).
+
+get_last(LUser, LServer) ->
+  case ejabberd_sql:sql_query(
+    LServer,
+    ?SQL("select @(seconds)d, @(state)s from last"
+    " where username=%(LUser)s and %(LServer)H")) of
+    {selected, []} ->
+      error;
+    {selected, [{TimeStamp, Status}]} ->
+      {ok, TimeStamp, Status};
+    _Reason ->
+      {error, db_failure}
+  end.
 
 depends(_Host, _Opts) ->
   [].
