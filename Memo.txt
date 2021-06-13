@@ -7,8 +7,8 @@ mnesia:clear_table(aws_push_type_token).
 mnesia:clear_table(aws_push_pushkit_token).
 
 
-D:\erl10.4\bin\erlc.exe -o D:\git\ejabberd\out\production\ejabberd -pa D:\git\ejabberd\out\production\ejabberd -pa /git/ejabberd +debug_info -I D:\git\ejabberd\include -I D:\git\ejabberd\lib D:\git\ejabberd\src\mod_aws_push.erl
-D:\erl10.4\bin\erlc.exe -o D:\git\ejabberd\out\production\ejabberd -pa D:\git\ejabberd\out\production\ejabberd -pa /git/ejabberd +debug_info -I D:\git\ejabberd\include -I D:\git\ejabberd\lib D:\git\ejabberd\src\mod_aws_push_opt.erl
+D:\Erlang\erl10.3\bin\erlc.exe -o D:\git\ejabberd\out\production\ejabberd -pa D:\git\ejabberd\out\production\ejabberd -pa /git/ejabberd +debug_info -I D:\git\ejabberd\include -I D:\git\ejabberd\lib D:\git\ejabberd\src\mod_aws_push.erl
+D:\Erlang\erl10.3\bin\erlc.exe -o D:\git\ejabberd\out\production\ejabberd -pa D:\git\ejabberd\out\production\ejabberd -pa /git/ejabberd +debug_info -I D:\git\ejabberd\include -I D:\git\ejabberd\lib D:\git\ejabberd\src\mod_aws_push_opt.erl
 
 
 sudo docker exec -it ejabberd_ejabberd-20.12_1 tail -f logs/ejabberd.log
