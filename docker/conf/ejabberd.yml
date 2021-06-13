@@ -229,6 +229,7 @@ modules:
   mod_http_upload:
     put_url: https://@HOST@:5443/upload
   mod_last: {}
+  mod_multi_last: {}
   mod_mam:
     ## Mnesia is limited to 2GB, better to use an SQL backend
     ## For small servers SQLite is a good fit and is very easy
