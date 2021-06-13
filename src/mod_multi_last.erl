@@ -48,7 +48,7 @@ process_iq(#iq{type = get, from = From, lang = Lang,
         {error, Code, Reason, _Txt} ->
           {true, #multi_last_item{jid = ToJid,
                                   errcode = Code,
-                                  text = Reason}};
+                                  text = atom_to_binary(Reason, unicode)}};
         _ ->
           false
       end
@@ -110,7 +110,7 @@ get_last_info(LUser, LServer, Lang) ->
           {error, ErrCode, Reason, Txt}
       end;
     _ ->
-      {true, 0, <<>>}
+      {ok, 0, <<>>}
   end.
 
 depends(_Host, _Opts) ->
