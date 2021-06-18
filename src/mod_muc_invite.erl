@@ -31,11 +31,12 @@ stop(Host) ->
   ejabberd_hooks:delete(muc_invite, Host,
     ?MODULE, process_muc_invite, 30).
 
-process_muc_invite(#message{sub_els = SubEls}, RoomJid, _Config, _From, To, Reason, _Pkg) ->
+process_muc_invite(#message{body = [#text{lang = Lang}], sub_els = SubEls},
+    RoomJid, _Config, _From, To, Reason, _Pkg) ->
   Msg = #message{from = RoomJid,
     to = To,
     type = normal,
-    body = [#text{data = Reason}],
+    body = [#text{lang = Lang, data = Reason}],
     sub_els = SubEls},
   {stop, Msg}.
 
