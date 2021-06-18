@@ -186,7 +186,9 @@ is_muc(From) ->
 	Hosts = [ mod_muc_opt:host(X) || X <- ejabberd_option:hosts() ],
 	lists:member(Server, Hosts).
 
-process_offline_message({From, To, #message{body = [#text{data = Data}] = Body} = _Packet}) ->
+process_offline_message({From, To, #message{
+			sub_els = SubEls,
+			body = [#text{data = Data}] = Body} = _Packet}) ->
 	?INFO_MSG("start to process offline message to ~p~n",[To]),
 	ToJID = jid:tolower(jid:remove_resource(To)),
 	case string:slice(Data, 0, 19) of
@@ -204,18 +206,33 @@ process_offline_message({From, To, #message{body = [#text{data = Data}] = Body} 
 						[] ->
 							ok;
 						_ ->
-							#jid{user = FromUser} = From,
-							send_notification(binary_to_list(FromUser), ToJID, Data, offline, missed)
+							Item = xmpp_codec:decode(SubEls),
+							case Item of
+								#push_disable{} ->
+									?DEBUG("Item:~p~n",[Item]),
+									ok;
+								_ ->
+									#jid{user = FromUser} = From,
+									send_notification(binary_to_list(FromUser), ToJID, Data, offline, missed)
+							end
 					end
 			end
 	end;
-process_offline_message({From, To, #message{} = Pkt}) ->
-	case xmpp:try_subtag(Pkt, #push_notification{}) of
-		false ->
+process_offline_message({From, To, #message{sub_els = Els} = _Pkt}) ->
+	Item = xmpp_codec:decode(Els),
+	case Item of
+		#push_notification{} ->
+			?DEBUG("Item:~p~n",[Item]),
 			ok;
 		Record ->
-			?DEBUG("Pkt:~p~n",[Pkt]),
 			case Record of
+				#push_notification{xdata = #xdata{fields = [#xdata_field{var = <<"type">>, values=[Type]},
+					#xdata_field{var = <<"message">>, values = [MsgBinary]}]}} ->
+					Type2 = binary_to_atom(string:lowercase(Type), unicode),
+					ToJID = jid:tolower(jid:remove_resource(To)),
+					#jid{user = FromUser} = From,
+					send_notification(binary_to_list(FromUser), ToJID, MsgBinary, Type2, ok);
+
 				#push_notification{xdata = #xdata{fields = [#xdata_field{var = <<"type">>, values=[Type]},
 					#xdata_field{var = <<"status">>, values = [StatusBinary]}]}} ->
 
@@ -483,26 +500,26 @@ insert_push_jid(PushJID, Token, PushKitToken, Type, Arn, PushKitArn) ->
 	}).
 
 -spec sm_receive_packet(stanza()) -> stanza().
-sm_receive_packet(#message{from = From, to = To} = Pkt) ->
-	case xmpp:try_subtag(Pkt, #push_notification{}) of
-		false ->
-			ok;
-		Record ->
-			?DEBUG("Pkt:~p~n",[Pkt]),
-			case Record of
-				#push_notification{xdata = #xdata{fields = [#xdata_field{var = <<"type">>, values=[Type]},
-					#xdata_field{var = <<"status">>, values = [<<"start">>]}]}} ->
-
+sm_receive_packet(#message{from = From, to = To, sub_els = Els} = Pkt) ->
+	Record = xmpp_codec:decode(Els),
+	case Record of
+		#push_notification{} ->
+			?DEBUG("Record:~p~n",[Record]),
+			#push_notification{xdata = #xdata{
+					fields = [#xdata_field{var = <<"type">>, values=[Type]},
+										#xdata_field{var = <<"status">>, values = [Status]}]}} = Record,
+			case Status of
+				<<"start">> ->
 					?DEBUG("status is start, send pushkit notification.~n",[]),
 					Type2 = binary_to_atom(string:lowercase(Type), unicode),
 					ToJID = jid:tolower(jid:remove_resource(To)),
 					#jid{luser = FromUser} = From,
 					send_notification(binary_to_list(FromUser), ToJID, <<>>, Type2, start);
 				_ ->
-
-					?DEBUG("Status is start, do nothing when user online.~n",[]),
-					ok
-			end
+					?DEBUG("status isn't start, do nothing.~n",[])
+			end;
+		_ ->
+			?DEBUG("No push_notification record found in message:~p~n",[Pkt])
 	end,
 	Pkt;
 sm_receive_packet(Acc) ->
@@ -542,7 +559,7 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 	case Type of
 		fcm ->
 			Message = "You have a message from " ++ FromUser,
-			try erlcloud_sns:publ(target, Arn,
+			try erlcloud_sns:publish(target, Arn,
 				Message, undefined,
 				get_attributes(Type), erlcloud_aws:default_config()) of
 				Result -> {ok, Result}
@@ -552,6 +569,15 @@ publish(PushKitArn, Arn, Type, FromUser, Data, Type2, CallTypeStatus) ->
 		_ ->
 			{Arn2, Msg} =
 				case Type2 of
+					general ->
+						Message = "{\"APNS\":" ++
+							"\"{\\\"aps\\\":{\\\"badge\\\":7," ++
+							"\\\"sound\\\":\\\"default\\\"," ++
+							"\\\"content-available\\\":1," ++
+							"\\\"alert\\\":{\\\"title\\\":\\\""
+							++ binary_to_list(Data)
+							++ "\\\"}}}\"}",
+						{Arn, Message};
 					location ->
 						Message = "{\"APNS\":" ++
 							"\"{\\\"aps\\\":{\\\"badge\\\":7," ++
