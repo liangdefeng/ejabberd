@@ -187,8 +187,7 @@ is_muc(From) ->
 	lists:member(Server, Hosts).
 
 process_offline_message({From, To, #message{
-			sub_els = SubEls,
-			body = [#text{data = Data}] = Body} = _Packet}) ->
+			body = [#text{data = Data}] = Body} = Packet}) ->
 	?INFO_MSG("start to process offline message to ~p~n",[To]),
 	ToJID = jid:tolower(jid:remove_resource(To)),
 	case string:slice(Data, 0, 19) of
@@ -206,23 +205,19 @@ process_offline_message({From, To, #message{
 						[] ->
 							ok;
 						_ ->
-							Item = xmpp_codec:decode(SubEls),
-							case Item of
-								#push_disable{} ->
-									?DEBUG("Item:~p~n",[Item]),
-									ok;
-								_ ->
+							case xmpp:try_subtag(Packet, #push_disable{}) of
+								false ->
 									#jid{user = FromUser} = From,
-									send_notification(binary_to_list(FromUser), ToJID, Data, offline, missed)
+									send_notification(binary_to_list(FromUser), ToJID, Data, offline, missed);
+								_ ->
+									ok
 							end
 					end
 			end
 	end;
-process_offline_message({From, To, #message{sub_els = Els} = _Pkt}) ->
-	Item = xmpp_codec:decode(Els),
-	case Item of
-		#push_notification{} ->
-			?DEBUG("Item:~p~n",[Item]),
+process_offline_message({From, To, #message{} = Pkt}) ->
+	case xmpp:try_subtag(Pkt, #push_notification{}) of
+		false ->
 			ok;
 		Record ->
 			case Record of
@@ -500,10 +495,11 @@ insert_push_jid(PushJID, Token, PushKitToken, Type, Arn, PushKitArn) ->
 	}).
 
 -spec sm_receive_packet(stanza()) -> stanza().
-sm_receive_packet(#message{from = From, to = To, sub_els = Els} = Pkt) ->
-	Record = xmpp_codec:decode(Els),
-	case Record of
-		#push_notification{} ->
+sm_receive_packet(#message{from = From, to = To} = Pkt) ->
+	case xmpp:try_subtag(Pkt, #push_notification{}) of
+		false ->
+			?DEBUG("No push_notification record found in message:~p~n",[Pkt]);
+		Record ->
 			?DEBUG("Record:~p~n",[Record]),
 			#push_notification{xdata = #xdata{
 					fields = [#xdata_field{var = <<"type">>, values=[Type]},
@@ -517,9 +513,7 @@ sm_receive_packet(#message{from = From, to = To, sub_els = Els} = Pkt) ->
 					send_notification(binary_to_list(FromUser), ToJID, <<>>, Type2, start);
 				_ ->
 					?DEBUG("status isn't start, do nothing.~n",[])
-			end;
-		_ ->
-			?DEBUG("No push_notification record found in message:~p~n",[Pkt])
+			end
 	end,
 	Pkt;
 sm_receive_packet(Acc) ->
