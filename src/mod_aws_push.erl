@@ -198,7 +198,7 @@ process_offline_message({From, To, #message{
 				true ->
 					FromResource = From#jid.lresource,
 					RoomTitle = get_room_title(From),
-					FromUser = binary_to_list(FromResource) ++ " in group " ++  RoomTitle,
+					FromUser = binary_to_list(FromResource) ++ " group " ++  RoomTitle,
 					send_notification(FromUser, ToJID, Data, offline, missed);
 				_ ->
 					case Body of
